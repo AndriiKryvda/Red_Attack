@@ -19,7 +19,7 @@ interface InternalEnemy extends EnemyData {
 
 interface InternalDrone extends DroneData {
   boostCooldownUntil: number;
-  input: { forward: number; right: number; up: number; yaw: number; pitch: number; boost: boolean };
+  input: { forward: number; up: number; boost: boolean };
 }
 
 interface InternalPlayer extends PlayerData {
@@ -260,23 +260,21 @@ export class GameRoom extends Room {
       const yaw = drone.yaw;
       const pitch = drone.pitch;
 
+      // Forward is in the direction the drone faces (yaw + pitch)
       const forwardX = Math.sin(yaw) * Math.cos(pitch);
       const forwardY = Math.sin(pitch);
       const forwardZ = Math.cos(yaw) * Math.cos(pitch);
-      const rightX = Math.cos(yaw);
-      const rightZ = -Math.sin(yaw);
 
-      drone.velocity.x = (forwardX * input.forward + rightX * input.right) * speed;
+      // Velocity: forward thrust + vertical (up/down)
+      drone.velocity.x = forwardX * input.forward * speed;
       drone.velocity.y = forwardY * input.forward * speed + input.up * speed;
-      drone.velocity.z = (forwardZ * input.forward + rightZ * input.right) * speed;
+      drone.velocity.z = forwardZ * input.forward * speed;
 
       drone.position.x += drone.velocity.x * dt;
       drone.position.y += drone.velocity.y * dt;
       drone.position.z += drone.velocity.z * dt;
       if (drone.position.y < 0.5) drone.position.y = 0.5;
       if (drone.position.y > 50) drone.position.y = 50;
-      drone.yaw = yaw;
-      drone.pitch = pitch;
 
       this.checkDroneCollisions(drone);
     }
@@ -365,7 +363,12 @@ export class GameRoom extends Room {
         if (player.state === PlayerState.PILOTING && player.droneId) {
           const drone = this.drones.get(player.droneId);
           if (drone && drone.alive) {
-            drone.input = { forward: msg.forward, right: msg.right, up: msg.up, yaw: msg.yaw, pitch: msg.pitch, boost: msg.boost };
+            // Apply yaw delta (incremental rotation from mouse + A/D)
+            drone.yaw += msg.yawDelta;
+            // Set pitch directly (absolute from mouse Y)
+            drone.pitch = msg.pitch;
+            // Store movement input
+            drone.input = { forward: msg.forward, up: msg.up, boost: msg.boost };
             if (msg.boost) drone.boostCooldownUntil = this.serverTime + DRONE_BOOST_COOLDOWN * 1000;
           }
         }
@@ -386,7 +389,7 @@ export class GameRoom extends Room {
       yaw: Math.random() * Math.PI * 2, pitch: 0,
       launchedAt: this.serverTime, alive: true,
       boostCooldownUntil: 0,
-      input: { forward: 0, right: 0, up: 0, yaw: 0, pitch: 0, boost: false },
+      input: { forward: 0, up: 0, boost: false },
     };
     this.drones.set(drone.id, drone);
     player.state = PlayerState.PILOTING;

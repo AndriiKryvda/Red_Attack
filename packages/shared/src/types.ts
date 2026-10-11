@@ -98,10 +98,9 @@ export interface LaunchDroneMsg {
 export interface DroneInputMsg {
   type: 'drone_input';
   forward: number;   // -1 to 1
-  right: number;     // -1 to 1
+  yawDelta: number;  // incremental yaw (mouse + A/D keys)
+  pitch: number;     // absolute pitch (radians)
   up: number;        // -1 to 1
-  yaw: number;       // radians
-  pitch: number;     // radians
   boost: boolean;
 }
 

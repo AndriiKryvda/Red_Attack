@@ -63,7 +63,7 @@ export class NetworkClient {
   }
 
   /** Rate-limited continuous drone input */
-  sendInput(input: { forward: number; right: number; up: number; yaw: number; pitch: number; boost: boolean }) {
+  sendInput(input: { forward: number; yawDelta: number; pitch: number; up: number; boost: boolean }) {
     const now = performance.now();
     if (now - this.inputRate < this.INPUT_INTERVAL) return;
     this.inputRate = now;
@@ -71,10 +71,9 @@ export class NetworkClient {
       this.room.send('drone_input', {
         type: 'drone_input',
         forward: input.forward,
-        right: input.right,
-        up: input.up,
-        yaw: input.yaw,
+        yawDelta: input.yawDelta,
         pitch: input.pitch,
+        up: input.up,
         boost: input.boost,
       });
     }

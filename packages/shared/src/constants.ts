@@ -46,8 +46,8 @@ export const HORDE_BEAR_DELAY = 40;          // bears join the horde after 40 s
 
 // ─── Map ───────────────────────────────────────────────────
 export const MAP_SIZE = 300;             // meters (square)
-export const HILL_RADIUS = 40;           // meters
-export const HILL_HEIGHT = 15;           // meters
+export const HILL_RADIUS = 0;            // meters (no hill)
+export const HILL_HEIGHT = 0;            // meters (no hill)
 export const OUTPOST_RADIUS = 15;        // meters (outpost footprint)
 export const HORDE_SPAWN_RING_MIN = 105;   // meters from center (nearest spawn arc)
 export const HORDE_SPAWN_RING_MAX = 140;   // meters from center (farthest spawn arc)

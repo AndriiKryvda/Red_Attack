@@ -54,6 +54,6 @@ export function createOutpost(): THREE.Group {
   flag.position.set(5, 7.2, 4);
   group.add(flag);
 
-  group.position.y = 15; // on top of hill
+  group.position.y = 0; // on flat ground
   return group;
 }

@@ -12,15 +12,6 @@ export function createTerrain(): THREE.Group {
   ground.receiveShadow = true;
   group.add(ground);
 
-  // Hill (cone)
-  const hillGeo = new THREE.ConeGeometry(40, 15, 16);
-  const hillMat = standardMaterial('dirt', { rx: 6, ry: 3, roughness: 1, normalScale: 1.2 });
-  const hill = new THREE.Mesh(hillGeo, hillMat);
-  hill.position.y = 7.5;
-  hill.receiveShadow = true;
-  hill.castShadow = true;
-  group.add(hill);
-
   // Some decorative trees (low-poly cones)
   const treeMat = standardMaterial('foliage', { rx: 2, ry: 2, roughness: 1 });
   const trunkMat = standardMaterial('bark', { rx: 1, ry: 2, roughness: 0.9 });

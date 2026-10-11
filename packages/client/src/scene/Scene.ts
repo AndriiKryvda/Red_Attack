@@ -17,8 +17,8 @@ export class GameScene {
   private clock: THREE.Clock;
   private localPlayerId: string = '';
 
-  // Fort camera position (top of hill + eye height)
-  private readonly FORT_POS = new THREE.Vector3(0, 17, 0);
+  // Fort camera position (eye height on flat ground)
+  private readonly FORT_POS = new THREE.Vector3(0, 6, 0);
 
   // Crash-cam + compass state
   private lastDronePos = new THREE.Vector3();
@@ -159,7 +159,7 @@ export class GameScene {
       );
       this.camera.lookAt(this.deathCamPos);
     } else {
-      // First-person fort view: stand on hill, look around with mouse
+      // First-person fort view: stand in fort, look around with mouse
       this.camera.position.copy(this.FORT_POS);
       const lookX = this.FORT_POS.x + Math.sin(playerYaw) * Math.cos(playerPitch) * 50;
       const lookY = this.FORT_POS.y + Math.sin(playerPitch) * 50;

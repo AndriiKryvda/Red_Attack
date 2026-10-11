@@ -31,5 +31,14 @@ app.get('/join/:code', (req, res) => {
   res.status(404).json({ error: 'Room not found' });
 });
 
-gameServer.listen(SERVER_PORT);
+gameServer.listen(SERVER_PORT).catch((err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[Red Attack] ERROR: Port ${SERVER_PORT} is already in use.`);
+    console.error(`  Kill the other process with:  npx kill-port ${SERVER_PORT}`);
+    console.error(`  Or on Windows:  netstat -ano | findstr ${SERVER_PORT}  →  taskkill /PID <pid> /F\n`);
+  } else {
+    console.error('[Red Attack] Server failed to start:', err.message);
+  }
+  process.exit(1);
+});
 console.log(`[Red Attack] Server listening on ws://localhost:${SERVER_PORT}`);

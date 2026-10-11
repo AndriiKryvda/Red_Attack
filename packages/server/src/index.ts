@@ -31,7 +31,17 @@ app.get('/join/:code', (req, res) => {
   res.status(404).json({ error: 'Room not found' });
 });
 
-gameServer.listen(SERVER_PORT).catch((err: NodeJS.ErrnoException) => {
+// Check if a room code exists and is joinable
+app.get('/room/:code', (req, res) => {
+  const code = req.params.code.toUpperCase();
+  const roomId = roomCodeRegistry.get(code);
+  if (!roomId) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  res.json({ roomId, exists: true });
+});
+
+gameServer.listen(SERVER_PORT, '0.0.0.0').catch((err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
     console.error(`\n[Red Attack] ERROR: Port ${SERVER_PORT} is already in use.`);
     console.error(`  Kill the other process with:  npx kill-port ${SERVER_PORT}`);

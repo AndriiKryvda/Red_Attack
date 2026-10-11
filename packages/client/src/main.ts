@@ -10,6 +10,10 @@ const btnStart = document.getElementById('btn-start') as HTMLButtonElement;
 const btnJoin = document.getElementById('btn-join') as HTMLButtonElement;
 const nameInput = document.getElementById('player-name') as HTMLInputElement;
 const roomCodeInput = document.getElementById('room-code') as HTMLInputElement;
+const errorMsg = document.getElementById('error-msg') as HTMLElement;
+const roomToast = document.getElementById('room-toast') as HTMLElement;
+const roomToastCode = document.getElementById('room-toast-code') as HTMLElement;
+const btnCopyCode = document.getElementById('btn-copy-code') as HTMLButtonElement;
 
 const hud = new HUD();
 const input = new InputManager(canvas);
@@ -32,9 +36,43 @@ btnStart.addEventListener('click', async () => {
     await network.connect(name);
     scene.setLocalPlayerId(network.sessionId);
     input.lockPointer();
-  } catch (e) {
+    // Show room code toast once state arrives
+    waitForRoomCode();
+  } catch (e: any) {
     gameStarted = false;
     overlay.classList.remove('hidden');
+    if (errorMsg) errorMsg.textContent = e?.message || 'Failed to create game';
+  }
+});
+
+// Show room code toast when first state arrives
+function waitForRoomCode() {
+  const check = setInterval(() => {
+    const state = network.getState();
+    if (state?.roomCode) {
+      clearInterval(check);
+      showRoomToast(state.roomCode);
+    }
+  }, 100);
+  // Stop checking after 5s
+  setTimeout(() => clearInterval(check), 5000);
+}
+
+function showRoomToast(code: string) {
+  roomToastCode.textContent = code;
+  roomToast.classList.remove('hidden');
+  // Auto-hide after 8 seconds
+  setTimeout(() => roomToast.classList.add('hidden'), 8000);
+}
+
+// Copy room code to clipboard
+btnCopyCode.addEventListener('click', () => {
+  const code = roomToastCode.textContent;
+  if (code) {
+    navigator.clipboard.writeText(code).then(() => {
+      btnCopyCode.textContent = '✓';
+      setTimeout(() => { btnCopyCode.textContent = '📋'; }, 1500);
+    });
   }
 });
 
@@ -42,7 +80,7 @@ btnStart.addEventListener('click', async () => {
 btnJoin.addEventListener('click', async () => {
   if (gameStarted) return;
   const code = roomCodeInput.value.trim().toUpperCase();
-  if (!code) { alert('Enter a room code'); return; }
+  if (!code) { if (errorMsg) errorMsg.textContent = 'Enter a room code'; return; }
   gameStarted = true;
   const name = nameInput.value.trim() || 'Pilot';
   overlay.classList.add('hidden');
@@ -50,9 +88,10 @@ btnJoin.addEventListener('click', async () => {
     await network.connect(name, code);
     scene.setLocalPlayerId(network.sessionId);
     input.lockPointer();
-  } catch (e) {
+  } catch (e: any) {
     gameStarted = false;
     overlay.classList.remove('hidden');
+    if (errorMsg) errorMsg.textContent = e?.message || 'Failed to join game';
   }
 });
 
@@ -71,7 +110,7 @@ function gameLoop(time: number) {
   // Update scene from network state
   scene.update(network.getState(), network.getEvents(), dt, input.getYaw(), input.getPitch());
   scene.render();
-  hud.update(network.getState(), network.sessionId);
+  hud.update(network.getState(), network.sessionId, scene.getHeading());
 
   // Clear events after processing
   network.clearEvents();
@@ -83,10 +122,10 @@ requestAnimationFrame(gameLoop);
 
 // ─── Events from server ────────────────────────────────────
 network.onEvent((event) => {
-  if (event.type === 'wave_start') {
-    hud.showAnnouncement(`WAVE ${event.wave}`);
-  } else if (event.type === 'wave_complete') {
-    hud.showAnnouncement(`WAVE ${event.wave} CLEARED!`);
+  if (event.type === 'horde_start') {
+    hud.showAnnouncement('HORDE INCOMING');
+  } else if (event.type === 'threat_level') {
+    hud.showAnnouncement(`⚠ THREAT LEVEL ${event.level}`);
   } else if (event.type === 'game_over') {
     hud.showAnnouncement(event.victory ? '🎉 VICTORY!' : '💀 DEFEAT');
   }

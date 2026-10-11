@@ -10,10 +10,7 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "outDir": "./dist",
-    "rootDir": "./src",
-    "paths": {
-      "@red-attack/shared": ["../shared/src"]
-    }
+    "rootDir": "./src"
   },
   "include": ["src/**/*"]
 }

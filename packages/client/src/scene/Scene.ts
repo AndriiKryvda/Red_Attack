@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GameState, EnemyType, PlayerState, ServerEvent } from '@red-attack/shared';
 import { createTerrain } from './Terrain';
 import { createOutpost } from './Outpost';
@@ -19,26 +20,53 @@ export class GameScene {
   // Fort camera position (top of hill + eye height)
   private readonly FORT_POS = new THREE.Vector3(0, 17, 0);
 
+  // Crash-cam + compass state
+  private lastDronePos = new THREE.Vector3();
+  private hadDrone = false;
+  private deathCamUntil = 0;
+  private deathCamPos = new THREE.Vector3();
+  private heading = 0;
+  private _fwd = new THREE.Vector3();
+
+  /** Compass heading (radians, clockwise from north = -Z). */
+  getHeading(): number { return this.heading; }
+
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Filmic tone mapping + sRGB output give PBR materials a realistic response.
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
     this.scene.fog = new THREE.Fog(0x87ceeb, 100, 250);
 
+    // Image-based lighting so metals/rough surfaces reflect a neutral studio
+    // environment (without this, metallic PBR surfaces render near-black).
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.7;
+    pmrem.dispose();
+
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 500);
     this.camera.position.copy(this.FORT_POS);
     this.camera.lookAt(0, 10, -50);
 
-    // Lighting
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    // Lighting (tuned for physically-based materials + IBL environment)
+    const ambient = new THREE.AmbientLight(0xffffff, 0.15);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+    // Sky/ground fill light for natural outdoor ambience.
+    const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x6b5b3e, 0.45);
+    hemi.position.set(0, 60, 0);
+    this.scene.add(hemi);
+
+    const sun = new THREE.DirectionalLight(0xfff2e0, 2.4);
     sun.position.set(50, 80, 30);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -74,8 +102,17 @@ export class GameScene {
     // Update enemies
     this.enemyRenderer.sync(state.enemies);
 
-    // Update drones
-    this.droneRenderer.sync(state.drones);
+    // Update drones. Remote drones get a per-pilot colour, a callsign tag and a
+    // smoke trail so every pilot can see the others in the sky.
+    const names: Record<string, string> = {};
+    for (const p of state.players) names[p.id] = p.name;
+    this.droneRenderer.sync(
+      state.drones,
+      this.localPlayerId,
+      names,
+      this.camera.position,
+      (x, y, z, color) => this.effects.spawnTrailPuff(x, y, z, color),
+    );
 
     // Process events (explosions etc)
     for (const ev of events) {
@@ -86,20 +123,41 @@ export class GameScene {
 
     // Find local player
     const me = state.players.find(p => p.id === this.localPlayerId);
+    const elapsed = this.clock.getElapsedTime();
+
+    // Detect our drone being destroyed -> hold a 5s crash-cam on the explosion
+    // before returning to the fort view.
+    const piloting = !!(me && me.state === PlayerState.PILOTING && me.droneId);
+    const myDrone = piloting ? state.drones.find(d => d.id === me!.droneId) : undefined;
+    if (myDrone) {
+      this.lastDronePos.set(myDrone.position.x, myDrone.position.y, myDrone.position.z);
+      this.hadDrone = true;
+    }
+    if (this.hadDrone && !piloting) {
+      this.deathCamPos.copy(this.lastDronePos);
+      this.deathCamUntil = elapsed + 5;
+      this.effects.spawnCrash(this.deathCamPos.x, this.deathCamPos.y, this.deathCamPos.z);
+      this.hadDrone = false;
+    }
 
     // Camera logic
-    if (me && me.state === PlayerState.PILOTING && me.droneId) {
+    if (piloting && myDrone) {
       // FPV drone camera
-      const myDrone = state.drones.find(d => d.id === me.droneId);
-      if (myDrone) {
-        this.camera.position.set(myDrone.position.x, myDrone.position.y, myDrone.position.z);
-        const yaw = myDrone.yaw;
-        const pitch = myDrone.pitch;
-        const lookX = myDrone.position.x + Math.sin(yaw) * Math.cos(pitch) * 10;
-        const lookY = myDrone.position.y + Math.sin(pitch) * 10;
-        const lookZ = myDrone.position.z + Math.cos(yaw) * Math.cos(pitch) * 10;
-        this.camera.lookAt(lookX, lookY, lookZ);
-      }
+      this.camera.position.set(myDrone.position.x, myDrone.position.y, myDrone.position.z);
+      const yaw = myDrone.yaw;
+      const pitch = myDrone.pitch;
+      const lookX = myDrone.position.x + Math.sin(yaw) * Math.cos(pitch) * 10;
+      const lookY = myDrone.position.y + Math.sin(pitch) * 10;
+      const lookZ = myDrone.position.z + Math.cos(yaw) * Math.cos(pitch) * 10;
+      this.camera.lookAt(lookX, lookY, lookZ);
+    } else if (elapsed < this.deathCamUntil) {
+      // Crash-cam: linger on the explosion for a few seconds, then switch back.
+      this.camera.position.set(
+        this.deathCamPos.x,
+        this.deathCamPos.y + 3,
+        this.deathCamPos.z + 7,
+      );
+      this.camera.lookAt(this.deathCamPos);
     } else {
       // First-person fort view: stand on hill, look around with mouse
       this.camera.position.copy(this.FORT_POS);
@@ -108,6 +166,10 @@ export class GameScene {
       const lookZ = this.FORT_POS.z + Math.cos(playerYaw) * Math.cos(playerPitch) * 50;
       this.camera.lookAt(lookX, lookY, lookZ);
     }
+
+    // Compass heading: view direction measured clockwise from north (-Z).
+    this.camera.getWorldDirection(this._fwd);
+    this.heading = Math.atan2(this._fwd.x, -this._fwd.z);
 
     // Update effects
     this.effects.update(_dt);

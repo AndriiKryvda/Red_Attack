@@ -20,6 +20,16 @@
     #hud .crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.7); border-radius: 50%; display: none; }
     #hud .crosshair.show { display: block; }
     #hud .room-code { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); color: #aaa; font-size: 13px; letter-spacing: 2px; }
+    #hud .compass { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); width: 76px; height: 76px; }
+    #hud .compass-rose { position: absolute; inset: 0; border: 2px solid rgba(255,255,255,0.5); border-radius: 50%; background: rgba(0,0,0,0.35); transition: transform 0.05s linear; }
+    #hud .compass-rose span { position: absolute; left: 50%; top: 50%; color: #fff; font-size: 13px; font-weight: bold; transform: translate(-50%,-50%); }
+    #hud .compass-rose .c-n { transform: translate(-50%,-50%) translateY(-27px); color: #ff5252; }
+    #hud .compass-rose .c-e { transform: translate(-50%,-50%) translateX(27px); }
+    #hud .compass-rose .c-s { transform: translate(-50%,-50%) translateY(27px); }
+    #hud .compass-rose .c-w { transform: translate(-50%,-50%) translateX(-27px); }
+    #hud .compass-ptr { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #ffd700; }
+    #hud .flight { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 8px 12px; color: #9fe8ff; font-size: 13px; line-height: 1.5; display: none; min-width: 130px; }
+    #hud .flight b { color: #fff; }
     #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
     #overlay.hidden { display: none; }
     #overlay .menu { text-align: center; color: #fff; }
@@ -29,6 +39,12 @@
     #overlay .menu button { padding: 12px 30px; font-size: 18px; background: #ff4444; color: #fff; border: none; border-radius: 4px; cursor: pointer; pointer-events: all; }
     #overlay .menu button:hover { background: #ff6666; }
     #overlay .menu .controls { margin-top: 20px; font-size: 13px; color: #888; line-height: 1.8; }
+    #room-toast { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); border: 2px solid #4caf50; border-radius: 8px; padding: 14px 24px; color: #fff; font-size: 18px; z-index: 200; display: flex; align-items: center; gap: 12px; pointer-events: all; transition: opacity 0.5s; }
+    #room-toast.hidden { display: none; }
+    #room-toast span { letter-spacing: 3px; font-weight: bold; color: #4caf50; }
+    #room-toast button { background: none; border: 1px solid #666; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 16px; }
+    #room-toast button:hover { border-color: #fff; }
+    #room-toast .toast-label { color: #aaa; font-size: 13px; font-weight: normal; letter-spacing: 0; }
   </style>
 </head>
 <body>
@@ -36,12 +52,24 @@
   <div id="hud">
     <div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div>
     <div class="hp-label" id="hp-label">Outpost: 100/100</div>
-    <div class="wave-info" id="wave-info">Wave 1 / 12</div>
+    <div class="wave-info" id="wave-info">Horde incoming…</div>
     <div class="drone-status" id="drone-status">Press SPACE to launch</div>
     <div class="score" id="score-display">Score: 0</div>
     <div class="room-code" id="room-code-display"></div>
     <div class="announcement" id="announcement"></div>
     <div class="crosshair" id="crosshair"></div>
+    <div class="compass">
+      <div class="compass-rose" id="compass-rose">
+        <span class="c-n">N</span><span class="c-e">E</span><span class="c-s">S</span><span class="c-w">W</span>
+      </div>
+      <div class="compass-ptr"></div>
+    </div>
+    <div class="flight" id="flight-panel">
+      <div>ALT <b id="fl-alt">0</b> m</div>
+      <div>SPD <b id="fl-spd">0</b> m/s</div>
+      <div>DIST <b id="fl-dist">0</b> m</div>
+      <div>TIME <b id="fl-time">0</b> s</div>
+    </div>
   </div>
   <div id="overlay">
     <div class="menu">
@@ -53,6 +81,7 @@
       <br/>
       <button id="btn-start">CREATE GAME</button>
       <button id="btn-join" style="margin-left:10px;background:#4caf50">JOIN GAME</button>
+      <div id="error-msg" style="color:#ff6b6b;font-size:14px;margin-top:12px;min-height:20px"></div>
       <div class="controls">
         <strong>Drone Controls (FPV):</strong><br/>
         W/S — Forward/Back | A/D — Yaw (rotate) | Mouse — Yaw + Pitch<br/>
@@ -60,6 +89,11 @@
         <em>Space also launches drone when waiting</em>
       </div>
     </div>
+  </div>
+  <div id="room-toast" class="hidden">
+    <span class="toast-label">Share code:</span>
+    <span id="room-toast-code"></span>
+    <button id="btn-copy-code" title="Copy code">📋</button>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

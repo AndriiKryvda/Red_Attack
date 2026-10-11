@@ -7,9 +7,12 @@ import {
   DRONE_KILL_RADIUS, DRONE_SLOW_RADIUS, DRONE_SLOW_DURATION, DRONE_FREEZE_DURATION,
   ENEMY_STATS, ENEMY_DEATH_LINGER_TIME,
   OUTPOST_HP_PER_PLAYER, ENEMY_TARRAM_DMG,
-  TOTAL_WAVES, WAVE_INTERVAL, MAX_ACTIVE_ENEMIES, WAVE_TABLE,
-  SPAWN_DISTANCE, SPAWN_ANGLES, TICK_RATE, MAX_PLAYERS,
-  MULTI_KILL_BONUS, MULTI_KILL_THRESHOLD, WAVE_NO_LEAK_BONUS,
+  MAX_ACTIVE_ENEMIES, TICK_RATE, MAX_PLAYERS,
+  MULTI_KILL_BONUS, MULTI_KILL_THRESHOLD,
+  HORDE_START_RATE, HORDE_MAX_RATE, HORDE_RAMP_TIME,
+  HORDE_SPAWN_BURST_MAX, HORDE_PLAYER_PRESSURE, HORDE_THREAT_INTERVAL,
+  HORDE_VICTORY_TIME, HORDE_SOLDIER_DELAY, HORDE_BEAR_DELAY,
+  HORDE_SPAWN_RING_MIN, HORDE_SPAWN_RING_MAX,
 } from '@red-attack/shared';
 import { roomCodeRegistry } from '../index.js';
 
@@ -28,8 +31,10 @@ interface InternalPlayer extends PlayerData {
 
 export class GameRoom extends Room {
   phase: GamePhase = GamePhase.LOBBY;
-  wave: number = 0;
-  waveCountdown: number = 0;
+  threatLevel: number = 1;
+  elapsed: number = 0;        // seconds the horde has been pressing the fort
+  kills: number = 0;
+  leaks: number = 0;
   outpostHp: number = 100;
   outpostMaxHp: number = 100;
   serverTime: number = 0;
@@ -39,17 +44,13 @@ export class GameRoom extends Room {
   drones: Map<string, InternalDrone> = new Map();
   players: Map<string, InternalPlayer> = new Map();
 
-  private spawnQueue: EnemyType[] = [];
-  private spawnTimer: number = 0;
-  private spawnInterval: number = 3.0;
-  private waveEnemiesTotal: number = 0;
-  private waveEnemiesKilled: number = 0;
-  private waveLeaks: number = 0;
+  private spawnAccumulator: number = 0;
   private idCounter: number = 0;
 
   // ─── Lifecycle ───────────────────────────────────────────
   onCreate(_options: any) {
     this.autoDispose = true;
+    this.maxClients = MAX_PLAYERS;
     this.setPatchRate(TICK_RATE);
     this.setSimulationInterval(() => this.tick(), TICK_RATE);
 
@@ -103,57 +104,48 @@ export class GameRoom extends Room {
   // ─── Game Flow ───────────────────────────────────────────
   private startGame() {
     this.phase = GamePhase.PLAYING;
-    this.wave = 0;
+    this.threatLevel = 1;
+    this.elapsed = 0;
+    this.spawnAccumulator = 0;
     this.updateOutpostHp();
     this.outpostHp = this.outpostMaxHp;
-    this.startNextWave();
+    this.broadcastEvent({ type: 'horde_start' });
+    console.log(`[Horde] Room ${this.roomCode}: endless horde engaged`);
   }
 
-  private startNextWave() {
-    this.wave++;
-    if (this.wave > TOTAL_WAVES) {
-      this.endGame(true);
-      return;
-    }
-
-    const waveConfig = WAVE_TABLE[this.wave - 1];
-    const playerCount = this.players.size;
-    this.spawnInterval = waveConfig.spawnInterval;
-    this.waveEnemiesKilled = 0;
-    this.waveLeaks = 0;
-
-    this.spawnQueue = [];
-    for (let i = 0; i < waveConfig.cheburashka * playerCount; i++) {
-      this.spawnQueue.push(EnemyType.CHEBURASHKA);
-    }
-    for (let i = 0; i < waveConfig.bear * playerCount; i++) {
-      this.spawnQueue.push(EnemyType.BEAR);
-    }
-    for (let i = 0; i < waveConfig.soldier * playerCount; i++) {
-      this.spawnQueue.push(EnemyType.SOLDIER);
-    }
-    for (let i = this.spawnQueue.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.spawnQueue[i], this.spawnQueue[j]] = [this.spawnQueue[j], this.spawnQueue[i]];
-    }
-
-    this.waveEnemiesTotal = this.spawnQueue.length;
-    this.spawnTimer = 0;
-    this.phase = GamePhase.PLAYING;
-
-    this.broadcastEvent({ type: 'wave_start', wave: this.wave, totalEnemies: this.waveEnemiesTotal });
-    console.log(`[Wave ${this.wave}] Started with ${this.waveEnemiesTotal} enemies`);
+  // ─── Horde escalation ────────────────────────────────────
+  /** 0 → 1 escalation progress driven by how long the fort keeps holding. */
+  private escalation(): number {
+    return Math.min(1, this.elapsed / HORDE_RAMP_TIME);
   }
 
-  private startIntermission() {
-    this.phase = GamePhase.WAVE_INTERMISSION;
-    this.waveCountdown = WAVE_INTERVAL;
-    if (this.waveLeaks === 0) {
-      for (const player of this.players.values()) {
-        player.score += WAVE_NO_LEAK_BONUS;
-      }
+  /** Enemies per second — ramps with time and scales with the crew size. */
+  private spawnRate(): number {
+    const pressure = 1 + HORDE_PLAYER_PRESSURE * Math.max(0, this.players.size - 1);
+    return (HORDE_START_RATE + (HORDE_MAX_RATE - HORDE_START_RATE) * this.escalation()) * pressure;
+  }
+
+  /** Enemy mix shifts over time: Cheburashka first, then soldiers, then bears. */
+  private pickEnemyType(): EnemyType {
+    const t = this.escalation();
+    const wCheb = Math.max(0.25, 1 - t * 0.9);
+    const wSoldier = this.elapsed >= HORDE_SOLDIER_DELAY ? 0.35 + t * 0.65 : 0;
+    const wBear = this.elapsed >= HORDE_BEAR_DELAY ? 0.1 + t * 0.55 : 0;
+    const total = wCheb + wSoldier + wBear;
+    let r = Math.random() * total;
+    if ((r -= wCheb) < 0) return EnemyType.CHEBURASHKA;
+    if ((r -= wSoldier) < 0) return EnemyType.SOLDIER;
+    return EnemyType.BEAR;
+  }
+
+  private updateThreatLevel() {
+    const level = 1 + Math.floor(this.elapsed / HORDE_THREAT_INTERVAL);
+    if (level !== this.threatLevel) {
+      this.threatLevel = level;
+      this.broadcastEvent({ type: 'threat_level', level, enemiesAlive: this.getActiveEnemyCount() });
+      console.log(`[Horde] Threat level ${level} — ${this.spawnRate().toFixed(2)} enemies/s`);
     }
-    this.broadcastEvent({ type: 'wave_complete', wave: this.wave });
+    if (HORDE_VICTORY_TIME > 0 && this.elapsed >= HORDE_VICTORY_TIME) this.endGame(true);
   }
 
   private endGame(victory: boolean) {
@@ -167,40 +159,44 @@ export class GameRoom extends Room {
   private tick() {
     this.serverTime = Date.now();
     if (this.phase === GamePhase.PLAYING) {
+      this.elapsed += TICK_RATE / 1000;
+      this.updateThreatLevel();
       this.tickSpawner();
       this.tickEnemies();
       this.tickDrones();
-      this.tickCooldowns();
-      this.checkWaveComplete();
-    } else if (this.phase === GamePhase.WAVE_INTERMISSION) {
-      this.tickIntermission();
-      this.tickEnemies();
       this.tickCooldowns();
     }
     this.broadcastState();
   }
 
   private tickSpawner() {
-    if (this.spawnQueue.length === 0) return;
-    this.spawnTimer += TICK_RATE / 1000;
-    if (this.spawnTimer >= this.spawnInterval) {
-      this.spawnTimer = 0;
-      if (this.getActiveEnemyCount() < MAX_ACTIVE_ENEMIES) {
-        const type = this.spawnQueue.shift()!;
-        this.spawnEnemy(type);
+    const dt = TICK_RATE / 1000;
+    this.spawnAccumulator += this.spawnRate() * dt;
+
+    let spawned = 0;
+    while (this.spawnAccumulator >= 1 && spawned < HORDE_SPAWN_BURST_MAX) {
+      if (this.getActiveEnemyCount() >= MAX_ACTIVE_ENEMIES) {
+        // Field is saturated — don't bank up spawns for later.
+        this.spawnAccumulator = 0;
+        return;
       }
+      this.spawnAccumulator -= 1;
+      spawned++;
+      this.spawnEnemy(this.pickEnemyType());
     }
+    if (this.spawnAccumulator > HORDE_SPAWN_BURST_MAX) this.spawnAccumulator = HORDE_SPAWN_BURST_MAX;
   }
 
   private spawnEnemy(type: EnemyType) {
     const stats = ENEMY_STATS[type];
-    const angle = SPAWN_ANGLES[Math.floor(Math.random() * SPAWN_ANGLES.length)];
-    const spread = (Math.random() - 0.5) * 30;
-    const spawnAngle = angle + (spread / SPAWN_DISTANCE);
+    // Full 360° assault: every enemy picks its own bearing and ring distance,
+    // so the horde closes on the fort from all directions at once.
+    const angle = Math.random() * Math.PI * 2;
+    const dist = HORDE_SPAWN_RING_MIN + Math.random() * (HORDE_SPAWN_RING_MAX - HORDE_SPAWN_RING_MIN);
     const pos: Vec3 = {
-      x: Math.cos(spawnAngle) * SPAWN_DISTANCE,
+      x: Math.cos(angle) * dist,
       y: 0,
-      z: Math.sin(spawnAngle) * SPAWN_DISTANCE,
+      z: Math.sin(angle) * dist,
     };
     const enemy: InternalEnemy = {
       id: `e_${this.idCounter++}`, type, position: pos,
@@ -231,7 +227,7 @@ export class GameRoom extends Room {
 
       if (dist < 5) {
         this.outpostHp -= ENEMY_TARRAM_DMG;
-        this.waveLeaks++;
+        this.leaks++;
         enemy.dead = true;
         enemy.deathTime = this.serverTime;
         if (this.outpostHp <= 0) { this.outpostHp = 0; this.endGame(false); }
@@ -294,7 +290,7 @@ export class GameRoom extends Room {
 
       if (distSq < killRadiusSq) {
         enemy.hp = 0; enemy.dead = true; enemy.deathTime = this.serverTime;
-        kills++; this.waveEnemiesKilled++;
+        kills++; this.kills++;
         const stats = ENEMY_STATS[enemy.type];
         const player = this.players.get(drone.ownerId);
         if (player) player.score += stats.score;
@@ -327,20 +323,8 @@ export class GameRoom extends Room {
   }
 
   // ─── Wave Complete & Intermission ────────────────────────
-  private checkWaveComplete() {
-    if (this.phase !== GamePhase.PLAYING) return;
-    if (this.spawnQueue.length > 0) return;
-    const activeEnemies = Array.from(this.enemies.values()).filter(e => !e.dead);
-    if (activeEnemies.length === 0) {
-      if (this.wave >= TOTAL_WAVES) this.endGame(true);
-      else this.startIntermission();
-    }
-  }
-
-  private tickIntermission() {
-    this.waveCountdown -= TICK_RATE / 1000;
-    if (this.waveCountdown <= 0) this.startNextWave();
-  }
+  // The horde never "completes": a run only ends when the fort falls (or when
+  // the optional HORDE_VICTORY_TIME is reached), so there is no wave state.
 
   // ─── Message Handling ────────────────────────────────────
   private handleMessage(client: Client, msg: ClientMessage) {
@@ -409,9 +393,12 @@ export class GameRoom extends Room {
   private generateRoomCode(): string {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += chars[Math.floor(Math.random() * chars.length)];
-    }
+    do {
+      code = '';
+      for (let i = 0; i < 4; i++) {
+        code += chars[Math.floor(Math.random() * chars.length)];
+      }
+    } while (roomCodeRegistry.has(code));
     return code;
   }
 
@@ -435,8 +422,11 @@ export class GameRoom extends Room {
   // ─── Broadcasting ────────────────────────────────────────
   private broadcastState() {
     const state = {
-      phase: this.phase, wave: this.wave, totalWaves: TOTAL_WAVES,
-      waveCountdown: Math.max(0, Math.ceil(this.waveCountdown)),
+      phase: this.phase,
+      threatLevel: this.threatLevel,
+      elapsed: Math.floor(this.elapsed),
+      enemiesAlive: this.getActiveEnemyCount(),
+      kills: this.kills,
       outpostHp: this.outpostHp, outpostMaxHp: this.outpostMaxHp,
       playerCount: this.players.size,
       roomCode: this.roomCode,

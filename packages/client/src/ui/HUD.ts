@@ -1,4 +1,5 @@
-import { GameState, PlayerState } from '@red-attack/shared';
+import { GameState, PlayerState, DroneData } from '@red-attack/shared';
+import { DRONE_MAX_FLIGHT_TIME } from '@red-attack/shared';
 
 export class HUD {
   private hpFill: HTMLElement;
@@ -9,6 +10,12 @@ export class HUD {
   private announcement: HTMLElement;
   private crosshair: HTMLElement;
   private roomCodeDisplay: HTMLElement;
+  private compassRose: HTMLElement;
+  private flightPanel: HTMLElement;
+  private flAlt: HTMLElement;
+  private flSpd: HTMLElement;
+  private flDist: HTMLElement;
+  private flTime: HTMLElement;
   private announceTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
@@ -20,10 +27,21 @@ export class HUD {
     this.announcement = document.getElementById('announcement')!;
     this.crosshair = document.getElementById('crosshair')!;
     this.roomCodeDisplay = document.getElementById('room-code-display')!;
+    this.compassRose = document.getElementById('compass-rose')!;
+    this.flightPanel = document.getElementById('flight-panel')!;
+    this.flAlt = document.getElementById('fl-alt')!;
+    this.flSpd = document.getElementById('fl-spd')!;
+    this.flDist = document.getElementById('fl-dist')!;
+    this.flTime = document.getElementById('fl-time')!;
   }
 
-  update(state: GameState | null, localSessionId: string) {
+  update(state: GameState | null, localSessionId: string, heading = 0) {
     if (!state) return;
+
+    // Compass: rotate the rose so the N marker points to world north (-Z).
+    if (this.compassRose) {
+      this.compassRose.style.transform = `rotate(${(-heading * 180) / Math.PI}deg)`;
+    }
 
     // Room code
     if (state.roomCode) {
@@ -36,12 +54,11 @@ export class HUD {
     this.hpFill.style.background = hpPct > 50 ? '#4caf50' : hpPct > 25 ? '#ff9800' : '#f44336';
     this.hpLabel.textContent = `Outpost: ${state.outpostHp}/${state.outpostMaxHp}`;
 
-    // Wave info
-    if (state.phase === 'wave_intermission') {
-      this.waveInfo.textContent = `Next wave in ${state.waveCountdown}s`;
-    } else {
-      this.waveInfo.textContent = `Wave ${state.wave} / ${state.totalWaves}`;
-    }
+    // Horde status: how deep into the assault we are, and what is still alive.
+    const mm = Math.floor(state.elapsed / 60);
+    const ss = String(state.elapsed % 60).padStart(2, '0');
+    this.waveInfo.textContent =
+      `⚠ THREAT ${state.threatLevel} · ${mm}:${ss} · ${state.enemiesAlive} ALIVE · ${state.kills} KILLS`;
 
     // Drone status — find local player by sessionId
     const player = state.players.find(p => p.id === localSessionId);
@@ -58,6 +75,24 @@ export class HUD {
         this.crosshair.classList.remove('show');
       }
       this.scoreDisplay.textContent = `Score: ${player.score}`;
+
+      // Flight instruments (only while actively piloting a live drone)
+      let drone: DroneData | undefined;
+      if (player.state === PlayerState.PILOTING && player.droneId) {
+        drone = state.drones.find(d => d.id === player.droneId);
+      }
+      if (drone) {
+        this.flightPanel.style.display = 'block';
+        const spd = Math.hypot(drone.velocity.x, drone.velocity.y, drone.velocity.z);
+        const dist = Math.hypot(drone.position.x, drone.position.z);
+        const timeLeft = Math.max(0, DRONE_MAX_FLIGHT_TIME - (state.serverTime - drone.launchedAt) / 1000);
+        this.flAlt.textContent = drone.position.y.toFixed(1);
+        this.flSpd.textContent = spd.toFixed(1);
+        this.flDist.textContent = dist.toFixed(0);
+        this.flTime.textContent = timeLeft.toFixed(1);
+      } else {
+        this.flightPanel.style.display = 'none';
+      }
     }
   }
 

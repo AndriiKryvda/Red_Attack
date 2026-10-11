@@ -24,7 +24,10 @@ export class NetworkClient {
         // Resolve room code to roomId via server HTTP endpoint
         const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
         const res = await fetch(`${protocol}//${window.location.hostname}:2567/join/${roomCode}`);
-        if (!res.ok) throw new Error(`Room "${roomCode}" not found`);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `Room "${roomCode}" not found`);
+        }
         const { roomId } = await res.json();
         this.room = await this.client.joinById(roomId, { name });
       } else {
@@ -46,9 +49,10 @@ export class NetworkClient {
         console.log('[Net] Left room');
         this.room = null;
       });
-    } catch (err) {
-      console.error('[Net] Failed to join:', err);
-      alert('Failed to connect to server. Is it running on port 2567?');
+    } catch (err: any) {
+      const message = err?.message || 'Failed to connect to server';
+      console.error('[Net] Failed to join:', message);
+      throw new Error(message);
     }
   }
 

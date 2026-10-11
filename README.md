@@ -1,6 +1,6 @@
 # 🔴 Red Attack
 
-A browser-based multiplayer FPV drone defense game. Players defend an outpost from waves of enemies by launching and piloting kamikaze drones in first-person view.
+A browser-based multiplayer FPV drone defense game. Players defend an outpost from an endless horde of enemies by launching and piloting kamikaze drones in first-person view.
 
 ## Tech Stack
 
@@ -26,7 +26,7 @@ red-attack/
 │   │       └── main.ts      # Game loop
 │   ├── server/          # Colyseus game server
 │   │   └── src/
-│   │       ├── rooms/       # GameRoom (state, physics, waves)
+│   │       ├── rooms/       # GameRoom (state, physics, horde)
 │   │       └── index.ts     # HTTP + WebSocket entry
 │   └── shared/          # Shared types & game constants
 │       └── src/
@@ -86,7 +86,8 @@ Open **http://localhost:5173** in your browser.
 - **Join Game** — enter the room code to join a friend's session.
 - Up to **4 players** per room.
 - Each player pilots their own drone independently.
-- Shared outpost HP and wave state.
+- Shared outpost HP and horde state.
+- Every pilot sees the other pilots' drones in the air (colour-coded per player, with a callsign tag and a smoke trail).
 
 ## Game Mechanics
 
@@ -97,8 +98,19 @@ Open **http://localhost:5173** in your browser.
 | Max distance | 150 m from outpost |
 | Kill radius | 3 m |
 | Reload time | 5 s |
-| Total waves | 12 |
+| Horde spawn rate | 0.35 → 1.6 enemies/s (ramps over 9 min, ×players) |
+| Threat level | +1 every 45 s |
+| Spawn directions | full 360° ring, 105–140 m from the fort |
 | Max players | 4 |
+
+### Endless Horde
+
+There are no discrete waves. Enemies stream toward the fort continuously from a
+random bearing on a 105–140 m ring, and the spawn rate climbs the longer the
+fort holds out: Cheburashka only at the start, soldiers from 15 s and bears from
+40 s, with heavier units becoming more common as the threat level rises. A run
+ends when the outpost falls (set `HORDE_VICTORY_TIME` in `packages/shared` to
+make it a timed-survival win instead).
 
 ### Enemy Types
 

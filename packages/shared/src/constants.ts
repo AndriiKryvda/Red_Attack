@@ -1,4 +1,4 @@
-import { EnemyType, WaveConfig } from './types';
+import { EnemyType } from './types.js';
 
 // ─── Drone ─────────────────────────────────────────────────
 export const DRONE_SPEED = 15;           // m/s
@@ -27,33 +27,30 @@ export const OUTPOST_WALL_HP_PER_PLAYER = 25;
 export const OUTPOST_WALLS = 4;
 export const ENEMY_TARRAM_DMG = 10;
 
-// ─── Waves ─────────────────────────────────────────────────
-export const TOTAL_WAVES = 12;
-export const WAVE_INTERVAL = 30; // seconds between waves
-export const MAX_ACTIVE_ENEMIES = 80;
+// ─── Horde (endless escalating assault) ──────────────────
+// There are no discrete waves: enemies stream toward the fort continuously and
+// the spawn cadence tightens the longer the fort survives.
+export const MAX_ACTIVE_ENEMIES = 80;        // hard cap of live enemies
 
-export const WAVE_TABLE: WaveConfig[] = [
-  { wave: 1, cheburashka: 1, bear: 1, soldier: 1, spawnInterval: 3.0 },
-  { wave: 2, cheburashka: 2, bear: 1, soldier: 1, spawnInterval: 2.5 },
-  { wave: 3, cheburashka: 2, bear: 1, soldier: 2, spawnInterval: 2.2 },
-  { wave: 4, cheburashka: 3, bear: 2, soldier: 2, spawnInterval: 2.0 },
-  { wave: 5, cheburashka: 3, bear: 2, soldier: 3, spawnInterval: 1.8 },
-  { wave: 6, cheburashka: 4, bear: 3, soldier: 3, spawnInterval: 1.6 },
-  { wave: 7, cheburashka: 5, bear: 3, soldier: 4, spawnInterval: 1.4 },
-  { wave: 8, cheburashka: 5, bear: 4, soldier: 5, spawnInterval: 1.2 },
-  { wave: 9, cheburashka: 6, bear: 5, soldier: 5, spawnInterval: 1.0 },
-  { wave: 10, cheburashka: 7, bear: 5, soldier: 6, spawnInterval: 0.9 },
-  { wave: 11, cheburashka: 8, bear: 6, soldier: 7, spawnInterval: 0.8 },
-  { wave: 12, cheburashka: 10, bear: 8, soldier: 8, spawnInterval: 0.6 },
-];
+export const HORDE_START_RATE = 0.35;        // enemies per second at t = 0 (~1 every 3 s)
+export const HORDE_MAX_RATE = 1.6;           // enemies per second at full escalation
+export const HORDE_RAMP_TIME = 540;          // seconds to reach HORDE_MAX_RATE
+export const HORDE_SPAWN_BURST_MAX = 3;      // enemies per spawn tick at max escalation
+export const HORDE_PLAYER_PRESSURE = 0.4;    // extra spawn rate per extra player
+export const HORDE_THREAT_INTERVAL = 45;     // seconds per displayed threat level
+export const HORDE_VICTORY_TIME = 0;         // 0 = endless survival, >0 = survive N s to win
+
+// Enemy mix unlocks over time so the first minute stays Cheburashka-heavy.
+export const HORDE_SOLDIER_DELAY = 15;       // soldiers join the horde after 15 s
+export const HORDE_BEAR_DELAY = 40;          // bears join the horde after 40 s
 
 // ─── Map ───────────────────────────────────────────────────
 export const MAP_SIZE = 300;             // meters (square)
 export const HILL_RADIUS = 40;           // meters
 export const HILL_HEIGHT = 15;           // meters
 export const OUTPOST_RADIUS = 15;        // meters (outpost footprint)
-export const SPAWN_DISTANCE = 120;       // meters from center
-export const SPAWN_ANGLES = [0, Math.PI / 2, Math.PI, Math.PI * 1.5]; // 4 directions
+export const HORDE_SPAWN_RING_MIN = 105;   // meters from center (nearest spawn arc)
+export const HORDE_SPAWN_RING_MAX = 140;   // meters from center (farthest spawn arc)
 
 // ─── Server ────────────────────────────────────────────────
 export const TICK_RATE = 50;             // ms per tick (20 TPS)
@@ -63,4 +60,3 @@ export const SERVER_PORT = 2567;
 // ─── Scoring ───────────────────────────────────────────────
 export const MULTI_KILL_BONUS = 50;
 export const MULTI_KILL_THRESHOLD = 3;
-export const WAVE_NO_LEAK_BONUS = 100;

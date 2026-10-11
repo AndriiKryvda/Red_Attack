@@ -9,7 +9,6 @@ export enum EnemyType {
 export enum GamePhase {
   LOBBY = 'lobby',
   PLAYING = 'playing',
-  WAVE_INTERMISSION = 'wave_intermission',
   VICTORY = 'victory',
   DEFEAT = 'defeat',
 }
@@ -65,21 +64,16 @@ export interface PlayerData {
   cooldownUntil: number; // timestamp
 }
 
-// ─── Wave Config ───────────────────────────────────────────
-export interface WaveConfig {
-  wave: number;
-  cheburashka: number;
-  bear: number;
-  soldier: number;
-  spawnInterval: number; // seconds
-}
+// ─── Horde ───────────────────────────────────────────
+// (removed) the game is one continuous horde — there is no per-wave config table.
 
 // ─── Game State (server → client) ─────────────────────────
 export interface GameState {
   phase: GamePhase;
-  wave: number;
-  totalWaves: number;
-  waveCountdown: number;   // seconds until next wave
+  threatLevel: number;     // escalating difficulty tier (1, 2, 3, ...)
+  elapsed: number;         // seconds the horde has been pressing the fort
+  enemiesAlive: number;    // live enemies currently on the field
+  kills: number;           // total enemies destroyed by all pilots
   outpostHp: number;
   outpostMaxHp: number;
   playerCount: number;
@@ -140,15 +134,14 @@ export interface EnemyKilledEvent {
   position: Vec3;
 }
 
-export interface WaveStartEvent {
-  type: 'wave_start';
-  wave: number;
-  totalEnemies: number;
+export interface HordeStartEvent {
+  type: 'horde_start';
 }
 
-export interface WaveCompleteEvent {
-  type: 'wave_complete';
-  wave: number;
+export interface ThreatLevelEvent {
+  type: 'threat_level';
+  level: number;
+  enemiesAlive: number;
 }
 
 export interface GameOverEvent {
@@ -160,6 +153,6 @@ export interface GameOverEvent {
 export type ServerEvent =
   | ExplosionEvent
   | EnemyKilledEvent
-  | WaveStartEvent
-  | WaveCompleteEvent
+  | HordeStartEvent
+  | ThreatLevelEvent
   | GameOverEvent;

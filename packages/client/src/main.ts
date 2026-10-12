@@ -14,6 +14,7 @@ const errorMsg = document.getElementById('error-msg') as HTMLElement;
 const roomToast = document.getElementById('room-toast') as HTMLElement;
 const roomToastCode = document.getElementById('room-toast-code') as HTMLElement;
 const btnCopyCode = document.getElementById('btn-copy-code') as HTMLButtonElement;
+const lockHint = document.getElementById('lock-hint') as HTMLElement | null;
 
 const hud = new HUD();
 const input = new InputManager(canvas);
@@ -25,6 +26,14 @@ let gameStarted = false;
 // Wire immediate-action callbacks (bypass rate limiter)
 input.onLaunch = () => { network.sendLaunch(); };
 input.onSelfDestruct = () => { network.sendSelfDestruct(); };
+input.onToggleKeysGuide = () => { hud.toggleKeysGuide(); };
+
+// The browser drops the mouse capture whenever the window loses focus; the
+// InputManager wins it back on return, and asks for this hint when it needs a
+// click to finish the job (e.g. after the player pressed Esc).
+input.onLockHintChange = (show) => {
+  lockHint?.classList.toggle('hidden', !show);
+};
 
 // "Create Game" button
 btnStart.addEventListener('click', async () => {
@@ -99,7 +108,9 @@ btnJoin.addEventListener('click', async () => {
 let lastTime = performance.now();
 
 function gameLoop(time: number) {
-  const dt = (time - lastTime) / 1000;
+  // requestAnimationFrame is paused while the tab is hidden, so the first frame
+  // after alt-tabbing back reports a huge elapsed time — clamp it.
+  const dt = Math.min(0.1, (time - lastTime) / 1000);
   lastTime = time;
 
   if (gameStarted) {
@@ -126,6 +137,10 @@ network.onEvent((event) => {
     hud.showAnnouncement('HORDE INCOMING');
   } else if (event.type === 'threat_level') {
     hud.showAnnouncement(`⚠ THREAT LEVEL ${event.level}`);
+  } else if (event.type === 'enemy_breach') {
+    // Enemies reaching the fort are only counted — the fight never stops.
+    // Announce milestones so a late-game burst of leaks doesn't spam the screen.
+    if (event.leaks % 10 === 0) hud.showAnnouncement(`☠ ${event.leaks} BREACHES`);
   } else if (event.type === 'game_over') {
     hud.showAnnouncement(event.victory ? '🎉 VICTORY!' : '💀 DEFEAT');
   }

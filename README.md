@@ -115,8 +115,8 @@ Open **http://localhost:5173** in your browser.
 
 There are no discrete waves. Enemies stream toward the fort continuously from a
 random bearing on a 105–140 m ring, and the spawn rate climbs the longer the
-fort holds out: Cheburashka only at the start, soldiers from 15 s and bears from
-40 s, with heavier units becoming more common as the threat level rises. A run
+fort holds out. All three enemy types are equally likely to spawn at any moment,
+so a bear or a soldier can show up in the very first seconds of a run. A run
 ends when the outpost falls (set `HORDE_VICTORY_TIME` in `packages/shared` to
 make it a timed-survival win instead).
 
@@ -127,6 +127,10 @@ make it a timed-survival win instead).
 | Cheburashka | 2.5 m/s | 1 | 10 |
 | Soldier | 1.8 m/s | 3 | 20 |
 | Bear | 1.0 m/s | 5 | 30 |
+
+Cheburashka and the bear both walk on two legs — the bear additionally marches a
+red banner on a pole — while the soldier marches in carrying a white ceramic
+water closet in both hands. These props are cosmetic and carry no mechanics.
 
 ## Build for Production
 

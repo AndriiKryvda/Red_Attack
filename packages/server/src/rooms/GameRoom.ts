@@ -10,7 +10,7 @@ import {
   MULTI_KILL_BONUS, MULTI_KILL_THRESHOLD,
   HORDE_START_RATE, HORDE_MAX_RATE, HORDE_RAMP_TIME,
   HORDE_SPAWN_BURST_MAX, HORDE_PLAYER_PRESSURE, HORDE_THREAT_INTERVAL,
-  HORDE_VICTORY_TIME, HORDE_SOLDIER_DELAY, HORDE_BEAR_DELAY,
+  HORDE_VICTORY_TIME,
   HORDE_SPAWN_RING_MIN, HORDE_SPAWN_RING_MAX,
 } from '@red-attack/shared';
 import { roomCodeRegistry } from '../index.js';
@@ -119,17 +119,10 @@ export class GameRoom extends Room {
     return (HORDE_START_RATE + (HORDE_MAX_RATE - HORDE_START_RATE) * this.escalation()) * pressure;
   }
 
-  /** Enemy mix shifts over time: Cheburashka first, then soldiers, then bears. */
+  /** Cheburashka, soldier and bear all spawn with the same probability. */
   private pickEnemyType(): EnemyType {
-    const t = this.escalation();
-    const wCheb = Math.max(0.25, 1 - t * 0.9);
-    const wSoldier = this.elapsed >= HORDE_SOLDIER_DELAY ? 0.35 + t * 0.65 : 0;
-    const wBear = this.elapsed >= HORDE_BEAR_DELAY ? 0.1 + t * 0.55 : 0;
-    const total = wCheb + wSoldier + wBear;
-    let r = Math.random() * total;
-    if ((r -= wCheb) < 0) return EnemyType.CHEBURASHKA;
-    if ((r -= wSoldier) < 0) return EnemyType.SOLDIER;
-    return EnemyType.BEAR;
+    const types: EnemyType[] = [EnemyType.CHEBURASHKA, EnemyType.SOLDIER, EnemyType.BEAR];
+    return types[(Math.random() * types.length) | 0];
   }
 
   private updateThreatLevel() {

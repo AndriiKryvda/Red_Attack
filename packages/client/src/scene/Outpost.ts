@@ -1,5 +1,55 @@
 import * as THREE from 'three';
-import { standardMaterial } from './Textures';
+import { standardMaterial, getMaps } from './Textures';
+
+// The fort flies the Ukrainian national flag: blue over yellow. Painted on a
+// canvas so both bands live on one quad (no seam, no second mesh) and still pick
+// up the shared fabric weave/normal map.
+function ukraineFlagTexture(): THREE.CanvasTexture {
+  const w = 256;
+  const h = 160;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d')!;
+
+  ctx.fillStyle = '#0057b7'; // sky blue, top half
+  ctx.fillRect(0, 0, w, h / 2);
+  ctx.fillStyle = '#ffd700'; // wheat gold, bottom half
+  ctx.fillRect(0, h / 2, w, h / 2);
+
+  // Soft vertical shading so the cloth never reads as flat plastic, plus a
+  // crisp seam line where the two bands meet.
+  const shade = ctx.createLinearGradient(0, 0, w, 0);
+  shade.addColorStop(0, 'rgba(0,0,0,0.22)');
+  shade.addColorStop(0.35, 'rgba(255,255,255,0.10)');
+  shade.addColorStop(0.7, 'rgba(0,0,0,0.14)');
+  shade.addColorStop(1, 'rgba(255,255,255,0.12)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(0, h / 2 - 1, w, 2);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+// Flat quad gently rippled along its length: the free edge (away from the pole)
+// swings the most, so the banner looks like it is hanging in a light breeze.
+function flagGeometry(): THREE.PlaneGeometry {
+  const geo = new THREE.PlaneGeometry(2, 1.2, 14, 8);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const t = (x + 1) / 2; // 0 at the pole edge, 1 at the free edge
+    pos.setZ(i, Math.sin(t * 5.5 + y * 1.6) * 0.11 * t * t);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
+}
 
 export function createOutpost(): THREE.Group {
   const group = new THREE.Group();
@@ -46,12 +96,18 @@ export function createOutpost(): THREE.Group {
   pole.position.set(4, 4, 4);
   group.add(pole);
 
-  // Flag
-  const flagGeo = new THREE.PlaneGeometry(2, 1.2);
-  const flagMat = standardMaterial('fabric', { color: 0xff0000, roughness: 0.9 });
-  flagMat.side = THREE.DoubleSide;
-  const flag = new THREE.Mesh(flagGeo, flagMat);
+  // Flag — Ukrainian blue-and-yellow, woven cloth lit like the rest of the fort.
+  const fabric = getMaps('fabric');
+  const flagMat = new THREE.MeshStandardMaterial({
+    map: ukraineFlagTexture(),
+    normalMap: fabric.normalMap,
+    roughness: 0.9,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
+  const flag = new THREE.Mesh(flagGeometry(), flagMat);
   flag.position.set(5, 7.2, 4);
+  flag.castShadow = true;
   group.add(flag);
 
   group.position.y = 0; // on flat ground

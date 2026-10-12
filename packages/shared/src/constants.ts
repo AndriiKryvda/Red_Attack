@@ -38,10 +38,6 @@ export const HORDE_PLAYER_PRESSURE = 0.4;    // extra spawn rate per extra playe
 export const HORDE_THREAT_INTERVAL = 45;     // seconds per displayed threat level
 export const HORDE_VICTORY_TIME = 0;         // 0 = endless survival, >0 = survive N s to win
 
-// Enemy mix unlocks over time so the first minute stays Cheburashka-heavy.
-export const HORDE_SOLDIER_DELAY = 15;       // soldiers join the horde after 15 s
-export const HORDE_BEAR_DELAY = 40;          // bears join the horde after 40 s
-
 // ─── Map ───────────────────────────────────────────────────
 export const MAP_SIZE = 300;             // meters (square)
 // The map is completely flat: there is no hill anywhere on the field.

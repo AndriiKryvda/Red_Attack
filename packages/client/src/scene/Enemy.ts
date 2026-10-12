@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { standardMaterial } from './Textures';
 import { EnemyData, EnemyType, ENEMY_STATS } from '@red-attack/shared';
+import { collectAnimated } from './ModelParts';
+import { createGolfCart, createMotorcyclist, createTank } from './VehicleModels';
 
 const ENEMY_COLORS: Record<EnemyType, number> = {
   [EnemyType.CHEBURASHKA]: 0x8b4513,
@@ -8,6 +10,26 @@ const ENEMY_COLORS: Record<EnemyType, number> = {
   // (see design doc: "Ведмідь (червоний прапор)"), not from its fur.
   [EnemyType.BEAR]: 0x4a3626,
   [EnemyType.SOLDIER]: 0x556b2f,
+  // Vehicle reinforcements: body paint used for the wreck tint and the minimap.
+  [EnemyType.GOLF_CART]: 0x2f7d32,
+  [EnemyType.MOTORCYCLIST]: 0x3c5a2a,
+  [EnemyType.TANK]: 0x4a5a33,
+};
+
+// The three mounted enemies. They march on wheels, so they die differently from
+// the foot troops: rolled onto their side instead of toppled flat, and — once
+// destroyed — replaced on the field by a burning wreck (see Effects.ts).
+function isVehicle(type: EnemyType): boolean {
+  return type === EnemyType.GOLF_CART || type === EnemyType.MOTORCYCLIST || type === EnemyType.TANK;
+}
+
+// How far off the ground a destroyed vehicle sits once it is rolled onto its side
+// — roughly half its width, which is a good deal less than the half-height the
+// upright model is lifted by. In units of `size`.
+const WRECK_LIFT: Partial<Record<EnemyType, number>> = {
+  [EnemyType.GOLF_CART]: 0.35,
+  [EnemyType.MOTORCYCLIST]: 0.21,
+  [EnemyType.TANK]: 0.40,
 };
 
 const FLAG_RED = 0xc8201c;
@@ -22,7 +44,12 @@ export class EnemyRenderer {
     this.scene = scene;
   }
 
-  sync(enemies: EnemyData[]) {
+  /**
+   * `onBurn` is called once per animation tick of an enemy that is burning but
+   * still alive (an armoured tank that survived its first drone) so the effects
+   * layer can pour flame out of it.
+   */
+  sync(enemies: EnemyData[], onBurn?: (x: number, y: number, z: number) => void) {
     const activeIds = new Set<string>();
     const now = performance.now() / 1000;
 
@@ -33,6 +60,7 @@ export class EnemyRenderer {
       if (!obj) {
         obj = this.createMesh(enemy.type);
         obj.userData.phase = Math.random() * Math.PI * 2;
+        obj.userData.lastBurn = -10;
         this.scene.add(obj);
         this.meshes.set(enemy.id, obj);
       }
@@ -43,22 +71,46 @@ export class EnemyRenderer {
       // instead of sliding sideways.
       const yaw = Math.atan2(-enemy.position.x, -enemy.position.z);
 
+      const phase = (obj.userData.phase as number) ?? 0;
+
       if (enemy.dead) {
         // Damaged wreck: keep the SAME recognizable model (never a generic cube),
         // tipped on its side and scorched, so a killed Cheburashka still reads as
-        // a dead Cheburashka instead of vanishing or turning into a box.
-        obj.position.set(enemy.position.x, enemy.position.y + size * 0.2, enemy.position.z);
-        obj.rotation.set(0.35, yaw, Math.PI / 2);
+        // a dead Cheburashka instead of vanishing or turning into a box. A vehicle
+        // now goes right over — flat on its side, resting on the ground at its own
+        // half-width — instead of standing in the field slightly listy.
+        if (isVehicle(enemy.type)) {
+          obj.position.set(enemy.position.x, enemy.position.y + size * (WRECK_LIFT[enemy.type] ?? 0.25), enemy.position.z);
+          obj.rotation.set(0.15, yaw, Math.PI / 2);
+        } else {
+          obj.position.set(enemy.position.x, enemy.position.y + size * 0.2, enemy.position.z);
+          obj.rotation.set(0.35, yaw, Math.PI / 2);
+        }
         this.animate(obj, now, 0, false);
-        this.setScorched(obj, true);
-        this.setEmissive(obj, 0x000000);
       } else {
         // Subtle walking bob so the models read as living creatures, not props.
-        const phase = (obj.userData.phase as number) ?? 0;
         const bob = Math.sin(now * 6 + phase) * size * 0.035;
         obj.position.set(enemy.position.x, enemy.position.y + size / 2 + bob, enemy.position.z);
         obj.rotation.set(0, yaw, 0);
         this.animate(obj, now, phase, true);
+      }
+
+      if (enemy.burning) {
+        // Armoured and already hit (the tank): burnt paint, a fire glow pulsing
+        // over every part and flame pouring out of the wreck. It keeps marching
+        // towards the fort — a second drone is needed to finish it — and it keeps
+        // burning after that second drone puts it on its side.
+        this.setScorched(obj, true, 0.55);
+        const flicker = 0.18 + 0.30 * (0.5 + 0.5 * Math.sin(now * 11 + phase));
+        this.setEmissive(obj, 0xff5a10, flicker);
+        if (onBurn && now - (obj.userData.lastBurn as number) > 0.16) {
+          obj.userData.lastBurn = now;
+          onBurn(enemy.position.x, enemy.position.y + size * (enemy.dead ? 0.3 : 0.55), enemy.position.z);
+        }
+      } else if (enemy.dead) {
+        this.setScorched(obj, true);
+        this.setEmissive(obj, 0x000000);
+      } else {
         this.setScorched(obj, false);
 
         // Flash tint when slowed/frozen (applied to every part of the model).
@@ -80,12 +132,12 @@ export class EnemyRenderer {
     }
   }
 
-  private setEmissive(obj: THREE.Object3D, hex: number) {
+  private setEmissive(obj: THREE.Object3D, hex: number, scale = 1) {
     obj.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (mesh.isMesh) {
         const mat = mesh.material as THREE.MeshStandardMaterial;
-        if (mat && mat.emissive) mat.emissive.setHex(hex);
+        if (mat && mat.emissive) mat.emissive.setHex(hex).multiplyScalar(scale);
       }
     });
   }
@@ -98,17 +150,27 @@ export class EnemyRenderer {
   private animate(obj: THREE.Object3D, now: number, phase: number, walking: boolean) {
     const step = walking ? Math.sin(now * 6 + phase) : 0;
     const flutter = walking ? Math.sin(now * 2.4 + phase) : 0;
-    obj.traverse((child) => {
-      const swing = child.userData.swing as number | undefined;
+    // Only a handful of parts of a model move and a tank is built from a couple of
+    // hundred meshes, so the tagged ones are collected once and cached.
+    let parts = obj.userData.animated as THREE.Object3D[] | undefined;
+    if (!parts) {
+      parts = collectAnimated(obj);
+      obj.userData.animated = parts;
+    }
+    for (const child of parts) {
+      const swing = child.userData.swing as number;
       if (swing !== undefined) child.rotation.x = step * swing;
-      const wave = child.userData.wave as number | undefined;
+      const wave = child.userData.wave as number;
       if (wave !== undefined) child.rotation.y = flutter * wave;
-    });
+      // Wheels spin while the vehicle drives; a wreck freezes them.
+      const roll = child.userData.roll as number;
+      if (roll !== undefined) child.rotation.x = walking ? now * roll : 0;
+    }
   }
 
   // Darken (scorch) every part of a wrecked enemy. Original colors are cached on
   // first call so the same object can be restored if it were ever revived.
-  private setScorched(obj: THREE.Object3D, on: boolean) {
+  private setScorched(obj: THREE.Object3D, on: boolean, factor = 0.3) {
     obj.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -119,7 +181,7 @@ export class EnemyRenderer {
       }
       if (on) {
         const base = new THREE.Color(mesh.userData.baseColor as number);
-        base.multiplyScalar(0.3);
+        base.multiplyScalar(factor);
         mat.color.copy(base);
       } else {
         mat.color.setHex(mesh.userData.baseColor as number);
@@ -143,7 +205,10 @@ export class EnemyRenderer {
     const size = ENEMY_STATS[type].size;
     if (type === EnemyType.CHEBURASHKA) return this.createCheburashka(size);
     if (type === EnemyType.BEAR) return this.createBear(size);
-    return this.createSoldier(size);
+    if (type === EnemyType.SOLDIER) return this.createSoldier(size);
+    if (type === EnemyType.GOLF_CART) return createGolfCart(size);
+    if (type === EnemyType.MOTORCYCLIST) return createMotorcyclist(size);
+    return createTank(size);
   }
 
   // Shared helper: add a shadow-casting part to a model group (parts face +Z).

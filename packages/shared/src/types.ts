@@ -3,6 +3,12 @@ export enum EnemyType {
   CHEBURASHKA = 'cheburashka',
   BEAR = 'bear',
   SOLDIER = 'soldier',
+  /** Green golf car carrying two soldiers — joins the horde after 10 kills. */
+  GOLF_CART = 'golf_cart',
+  /** Soldier on a motorcycle — joins the horde after 20 kills. */
+  MOTORCYCLIST = 'motorcyclist',
+  /** Armoured tank: takes two drone hits, igniting after the first one. */
+  TANK = 'tank',
 }
 
 // ─── Game Phases ───────────────────────────────────────────
@@ -39,6 +45,8 @@ export interface EnemyData {
   frozenUntil: number;   // timestamp
   dead: boolean;
   deathTime: number;     // timestamp when killed
+  /** Set once an armoured enemy survives a hit: it burns but keeps moving. */
+  burning: boolean;
 }
 
 // ─── Drone ─────────────────────────────────────────────────
@@ -133,6 +141,25 @@ export interface EnemyKilledEvent {
   position: Vec3;
 }
 
+/** An armoured enemy soaked up a hit without dying (the tank after 1 drone). */
+export interface EnemyHitEvent {
+  type: 'enemy_hit';
+  enemyId: string;
+  enemyType: EnemyType;
+  killerId: string;
+  position: Vec3;
+  hp: number;
+  maxHp: number;
+  burning: boolean;
+}
+
+/** A new enemy type just crossed its kill threshold and started spawning. */
+export interface NewEnemyEvent {
+  type: 'new_enemy';
+  enemyType: EnemyType;
+  kills: number;
+}
+
 export interface HordeStartEvent {
   type: 'horde_start';
 }
@@ -160,6 +187,8 @@ export interface GameOverEvent {
 export type ServerEvent =
   | ExplosionEvent
   | EnemyKilledEvent
+  | EnemyHitEvent
+  | NewEnemyEvent
   | HordeStartEvent
   | ThreatLevelEvent
   | EnemyBreachEvent

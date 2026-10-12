@@ -6,12 +6,13 @@ import {
   DRONE_MAX_FLIGHT_TIME, DRONE_MAX_DISTANCE, DRONE_RELOAD_TIME,
   DRONE_KILL_RADIUS, DRONE_SLOW_RADIUS, DRONE_SLOW_DURATION, DRONE_FREEZE_DURATION,
   ENEMY_STATS, ENEMY_DEATH_LINGER_TIME,
+  ALL_ENEMY_TYPES, ENEMY_UNLOCK_KILLS, ENEMY_SPAWN_WEIGHTS,
   MAX_ACTIVE_ENEMIES, TICK_RATE, MAX_PLAYERS,
   MULTI_KILL_BONUS, MULTI_KILL_THRESHOLD,
   HORDE_START_RATE, HORDE_MAX_RATE, HORDE_RAMP_TIME,
   HORDE_SPAWN_BURST_MAX, HORDE_PLAYER_PRESSURE, HORDE_THREAT_INTERVAL,
   HORDE_VICTORY_TIME,
-  HORDE_SPAWN_RING_MIN, HORDE_SPAWN_RING_MAX,
+  HORDE_SPAWN_BORDER, HORDE_SPAWN_RING_MIN, HORDE_SPAWN_RING_MAX,
 } from '@red-attack/shared';
 import { roomCodeRegistry } from '../index.js';
 
@@ -28,6 +29,12 @@ interface InternalPlayer extends PlayerData {
   lastInput: number;
 }
 
+/**
+ * Share of the kill score paid to a pilot whose drone damaged an armoured target
+ * without destroying it (the tank after the first hit).
+ */
+const ARMOUR_HIT_SCORE_SHARE = 0.25;
+
 export class GameRoom extends Room {
   phase: GamePhase = GamePhase.LOBBY;
   threatLevel: number = 1;
@@ -43,6 +50,8 @@ export class GameRoom extends Room {
 
   private spawnAccumulator: number = 0;
   private idCounter: number = 0;
+  /** Enemy types whose kill threshold has been reached (and announced). */
+  private unlockedEnemies: Set<EnemyType> = new Set();
 
   // ─── Lifecycle ───────────────────────────────────────────
   onCreate(_options: any) {
@@ -103,6 +112,8 @@ export class GameRoom extends Room {
     this.elapsed = 0;
     this.spawnAccumulator = 0;
     this.leaks = 0;
+    this.kills = 0;
+    this.unlockedEnemies.clear();
     this.broadcastEvent({ type: 'horde_start' });
     console.log(`[Horde] Room ${this.roomCode}: endless horde engaged`);
   }
@@ -119,10 +130,37 @@ export class GameRoom extends Room {
     return (HORDE_START_RATE + (HORDE_MAX_RATE - HORDE_START_RATE) * this.escalation()) * pressure;
   }
 
-  /** Cheburashka, soldier and bear all spawn with the same probability. */
+  /**
+   * Weighted pick over the types the pilots have unlocked so far. The fort has to
+   * claim 10 kills before the golf car shows up, 20 for the motorcyclist and 30
+   * for the tank (see ENEMY_UNLOCK_KILLS / ENEMY_SPAWN_WEIGHTS).
+   */
   private pickEnemyType(): EnemyType {
-    const types: EnemyType[] = [EnemyType.CHEBURASHKA, EnemyType.SOLDIER, EnemyType.BEAR];
-    return types[(Math.random() * types.length) | 0];
+    const pool: EnemyType[] = [];
+    let total = 0;
+    for (const type of ALL_ENEMY_TYPES) {
+      if (this.kills < ENEMY_UNLOCK_KILLS[type]) continue;
+      pool.push(type);
+      total += ENEMY_SPAWN_WEIGHTS[type];
+    }
+    let roll = Math.random() * total;
+    for (const type of pool) {
+      roll -= ENEMY_SPAWN_WEIGHTS[type];
+      if (roll <= 0) return type;
+    }
+    return pool[pool.length - 1];
+  }
+
+  /** Announces each reinforcement the first time its kill threshold is passed. */
+  private checkUnlocks() {
+    for (const type of ALL_ENEMY_TYPES) {
+      const needed = ENEMY_UNLOCK_KILLS[type];
+      if (needed === 0 || this.kills < needed) continue;
+      if (this.unlockedEnemies.has(type)) continue;
+      this.unlockedEnemies.add(type);
+      this.broadcastEvent({ type: 'new_enemy', enemyType: type, kills: this.kills });
+      console.log(`[Horde] ${type} unlocked at ${this.kills} kills`);
+    }
   }
 
   private updateThreatLevel() {
@@ -177,19 +215,26 @@ export class GameRoom extends Room {
 
   private spawnEnemy(type: EnemyType) {
     const stats = ENEMY_STATS[type];
-    // Full 360° assault: every enemy picks its own bearing and ring distance,
-    // so the horde closes on the fort from all directions at once.
+    // Border spawn: pick a bearing, walk it out to the edge of the map and drop
+    // the enemy there, so the horde has to cross the whole field instead of
+    // appearing halfway to the wall. The square edge is rounded off at
+    // HORDE_SPAWN_RING_MAX so nobody spawns in a far corner out of drone reach,
+    // and the ring minimum gives the back of a spawn pack some spread.
     const angle = Math.random() * Math.PI * 2;
-    const dist = HORDE_SPAWN_RING_MIN + Math.random() * (HORDE_SPAWN_RING_MAX - HORDE_SPAWN_RING_MIN);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const edge = HORDE_SPAWN_BORDER / Math.max(Math.abs(cos), Math.abs(sin));
+    const dist = Math.min(edge, HORDE_SPAWN_RING_MAX)
+      - Math.random() * (HORDE_SPAWN_RING_MAX - HORDE_SPAWN_RING_MIN);
     const pos: Vec3 = {
-      x: Math.cos(angle) * dist,
+      x: cos * dist,
       y: 0,
-      z: Math.sin(angle) * dist,
+      z: sin * dist,
     };
     const enemy: InternalEnemy = {
       id: `e_${this.idCounter++}`, type, position: pos,
       hp: stats.hp, maxHp: stats.hp, speed: stats.speed,
-      slowedUntil: 0, frozenUntil: 0, dead: false, deathTime: 0,
+      slowedUntil: 0, frozenUntil: 0, dead: false, deathTime: 0, burning: false,
       targetPos: { x: 0, y: 0, z: 0 },
     };
     this.enemies.set(enemy.id, enemy);
@@ -272,6 +317,7 @@ export class GameRoom extends Room {
 
   private checkDroneCollisions(drone: InternalDrone) {
     let kills = 0;
+    let contacts = 0;
     const killRadiusSq = DRONE_KILL_RADIUS * DRONE_KILL_RADIUS;
     const slowRadiusSq = DRONE_SLOW_RADIUS * DRONE_SLOW_RADIUS;
 
@@ -283,12 +329,8 @@ export class GameRoom extends Room {
       const distSq = dx * dx + dy * dy + dz * dz;
 
       if (distSq < killRadiusSq) {
-        enemy.hp = 0; enemy.dead = true; enemy.deathTime = this.serverTime;
-        kills++; this.kills++;
-        const stats = ENEMY_STATS[enemy.type];
-        const player = this.players.get(drone.ownerId);
-        if (player) player.score += stats.score;
-        this.broadcastEvent({ type: 'enemy_killed', enemyId: enemy.id, enemyType: enemy.type, killerId: drone.ownerId, position: { ...enemy.position } });
+        contacts++;
+        if (this.damageEnemy(enemy, drone.ownerId)) kills++;
       } else if (distSq < slowRadiusSq) {
         if (distSq < killRadiusSq * 2) {
           enemy.frozenUntil = this.serverTime + DRONE_FREEZE_DURATION * 1000;
@@ -301,7 +343,41 @@ export class GameRoom extends Room {
       const player = this.players.get(drone.ownerId);
       if (player) player.score += MULTI_KILL_BONUS;
     }
-    if (kills > 0) this.explodeDrone(drone);
+    // The quad detonates on contact whether or not the target went with it: an
+    // armoured kill costs the pilot a drone either way.
+    if (contacts > 0) this.explodeDrone(drone);
+  }
+
+  /**
+   * Applies one drone detonation to an enemy and returns true if it died.
+   * Armoured units (the tank) soak a hit, catch fire and keep driving, so they
+   * need a second quad to finish them off.
+   */
+  private damageEnemy(enemy: InternalEnemy, killerId: string): boolean {
+    const stats = ENEMY_STATS[enemy.type];
+    const player = this.players.get(killerId);
+    enemy.hp = Math.max(0, enemy.hp - stats.armour);
+
+    if (enemy.hp > 0) {
+      enemy.burning = true;
+      if (player) player.score += Math.round(stats.score * ARMOUR_HIT_SCORE_SHARE);
+      this.broadcastEvent({
+        type: 'enemy_hit', enemyId: enemy.id, enemyType: enemy.type, killerId,
+        position: { ...enemy.position }, hp: enemy.hp, maxHp: enemy.maxHp, burning: true,
+      });
+      return false;
+    }
+
+    enemy.dead = true;
+    enemy.deathTime = this.serverTime;
+    this.kills++;
+    if (player) player.score += stats.score;
+    this.broadcastEvent({
+      type: 'enemy_killed', enemyId: enemy.id, enemyType: enemy.type, killerId,
+      position: { ...enemy.position },
+    });
+    this.checkUnlocks();
+    return true;
   }
 
   private explodeDrone(drone: InternalDrone) {
@@ -417,7 +493,7 @@ export class GameRoom extends Room {
         id: e.id, type: e.type, position: e.position,
         hp: e.hp, maxHp: e.maxHp, speed: e.speed,
         slowedUntil: e.slowedUntil, frozenUntil: e.frozenUntil,
-        dead: e.dead, deathTime: e.deathTime,
+        dead: e.dead, deathTime: e.deathTime, burning: e.burning,
       })),
       drones: Array.from(this.drones.values()).map(d => ({
         id: d.id, ownerId: d.ownerId, position: d.position,

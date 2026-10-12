@@ -2,6 +2,7 @@ import { GameScene } from './scene/Scene';
 import { NetworkClient } from './network/Client';
 import { InputManager } from './input/InputManager';
 import { HUD } from './ui/HUD';
+import { ENEMY_DISPLAY_NAMES } from '@red-attack/shared';
 
 // ─── Bootstrap ─────────────────────────────────────────────
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -137,6 +138,10 @@ network.onEvent((event) => {
     hud.showAnnouncement('HORDE INCOMING');
   } else if (event.type === 'threat_level') {
     hud.showAnnouncement(`⚠ THREAT LEVEL ${event.level}`);
+  } else if (event.type === 'new_enemy') {
+    hud.showAnnouncement(`⚠ NEW ENEMY INCOMING: ${ENEMY_DISPLAY_NAMES[event.enemyType]}`);
+  } else if (event.type === 'enemy_hit') {
+    hud.showAnnouncement('🔥 TARGET IGNITED - ONE MORE DRONE');
   } else if (event.type === 'enemy_breach') {
     // Enemies reaching the fort are only counted — the fight never stops.
     // Announce milestones so a late-game burst of leaks doesn't spam the screen.

@@ -100,7 +100,9 @@ export class GameScene {
     if (!state) return;
 
     // Update enemies
-    this.enemyRenderer.sync(state.enemies);
+    // An armoured enemy that survived its first drone keeps burning: hand the
+    // effects layer one flame puff per burning enemy per frame.
+    this.enemyRenderer.sync(state.enemies, (x, y, z) => this.effects.spawnFirePuff(x, y, z));
 
     // Update drones. Remote drones get a per-pilot colour, a callsign tag and a
     // smoke trail so every pilot can see the others in the sky.
@@ -118,6 +120,10 @@ export class GameScene {
     for (const ev of events) {
       if (ev.type === 'explosion') {
         this.effects.spawnExplosion(ev.position.x, ev.position.y, ev.position.z);
+      } else if (ev.type === 'enemy_killed') {
+        // A destroyed vehicle leaves a burning wreck on the field. Foot troops
+        // have no hull to burn, so the call simply ignores them.
+        this.effects.spawnBurningWreck(ev.enemyType, ev.position.x, ev.position.z);
       } else if (ev.type === 'enemy_breach') {
         // An enemy slipped through at the wall: mark it with a red puff so the
         // breach is visible without ending anything.

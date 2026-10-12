@@ -266,7 +266,7 @@ red-attack/
 │       │   ├── main.ts          # Entry
 │       │   ├── scene/
 │       │   │   ├── Scene.ts         # Three.js scene setup
-│       │   │   ├── Terrain.ts       # Hill + outpost
+│       │   │   ├── Terrain.ts       # Flat ground + forest + outpost
 │       │   │   ├── Drone.ts         # Drone model + controller
 │       │   │   ├── Enemy.ts         # Enemy rendering
 │       │   │   ├── Effects.ts       # Explosions, particles

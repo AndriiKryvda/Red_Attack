@@ -118,6 +118,10 @@ export class GameScene {
     for (const ev of events) {
       if (ev.type === 'explosion') {
         this.effects.spawnExplosion(ev.position.x, ev.position.y, ev.position.z);
+      } else if (ev.type === 'enemy_breach') {
+        // An enemy slipped through at the wall: mark it with a red puff so the
+        // breach is visible without ending anything.
+        this.effects.spawnTrailPuff(ev.position.x, ev.position.y + 0.8, ev.position.z, 0xff3b30);
       }
     }
 

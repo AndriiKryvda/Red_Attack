@@ -74,8 +74,7 @@ export interface GameState {
   elapsed: number;         // seconds the horde has been pressing the fort
   enemiesAlive: number;    // live enemies currently on the field
   kills: number;           // total enemies destroyed by all pilots
-  outpostHp: number;
-  outpostMaxHp: number;
+  leaks: number;           // enemies that made it through to the fort (never ends the game)
   playerCount: number;
   roomCode: string;
   enemies: EnemyData[];
@@ -144,6 +143,14 @@ export interface ThreatLevelEvent {
   enemiesAlive: number;
 }
 
+export interface EnemyBreachEvent {
+  type: 'enemy_breach';
+  enemyId: string;
+  enemyType: EnemyType;
+  position: Vec3;
+  leaks: number;           // running total of enemies that reached the fort
+}
+
 export interface GameOverEvent {
   type: 'game_over';
   victory: boolean;
@@ -155,4 +162,5 @@ export type ServerEvent =
   | EnemyKilledEvent
   | HordeStartEvent
   | ThreatLevelEvent
+  | EnemyBreachEvent
   | GameOverEvent;

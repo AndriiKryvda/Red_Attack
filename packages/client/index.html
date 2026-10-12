@@ -9,9 +9,11 @@
     body { overflow: hidden; background: #1a1a2e; font-family: 'Segoe UI', sans-serif; }
     #game-canvas { width: 100vw; height: 100vh; display: block; }
     #hud { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-    #hud .hp-bar { position: absolute; top: 20px; left: 20px; width: 200px; height: 20px; background: #333; border: 2px solid #fff; border-radius: 4px; }
-    #hud .hp-bar .hp-fill { height: 100%; background: #4caf50; transition: width 0.3s; border-radius: 2px; }
-    #hud .hp-label { position: absolute; top: 44px; left: 20px; color: #fff; font-size: 12px; }
+    #hud .breach { position: absolute; top: 20px; left: 20px; color: #fff; font-size: 26px; font-weight: bold; line-height: 1; text-shadow: 2px 2px 4px #000; transition: color 0.25s, transform 0.25s; }
+    #hud .breach small { display: block; margin-top: 4px; color: #bbb; font-size: 11px; font-weight: normal; letter-spacing: 2px; }
+    #hud .breach.flash { color: #ff5252; transform: scale(1.2); }
+    #breach-flash { position: fixed; inset: 0; pointer-events: none; z-index: 15; opacity: 0; transition: opacity 0.5s ease-out; box-shadow: inset 0 0 170px 45px rgba(255,0,0,0.55); }
+    #breach-flash.show { opacity: 1; transition: opacity 0.05s ease-in; }
     #hud .wave-info { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 18px; text-align: center; }
     #hud .drone-status { position: absolute; top: 20px; right: 20px; color: #fff; font-size: 14px; text-align: right; }
     #hud .score { position: absolute; top: 50px; right: 20px; color: #ffd700; font-size: 16px; }
@@ -30,6 +32,15 @@
     #hud .compass-ptr { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #ffd700; }
     #hud .flight { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 8px 12px; color: #9fe8ff; font-size: 13px; line-height: 1.5; display: none; min-width: 130px; }
     #hud .flight b { color: #fff; }
+    #hud .keys-guide { position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 8px 12px; color: #cfe8ff; font-size: 12px; line-height: 1.55; min-width: 236px; }
+    #hud .keys-guide.hidden { display: none; }
+    #hud .keys-guide .kg-title { display: flex; justify-content: space-between; gap: 14px; color: #fff; font-size: 11px; font-weight: bold; letter-spacing: 2px; border-bottom: 1px solid rgba(255,255,255,0.25); padding-bottom: 4px; margin-bottom: 6px; }
+    #hud .keys-guide .kg-title small { color: #8fd18f; font-weight: normal; letter-spacing: 0; }
+    #hud .keys-guide .kg-row { display: flex; align-items: center; gap: 8px; }
+    #hud .keys-guide .kg-keys { display: flex; gap: 3px; min-width: 78px; }
+    #hud .keys-guide kbd { display: inline-block; min-width: 16px; text-align: center; background: #1f1f2b; border: 1px solid #6b6b7b; border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; color: #fff; font-size: 11px; font-weight: 600; font-family: inherit; }
+    #hud .keys-guide .kg-row.on kbd { border-color: #4caf50; color: #b6f5b6; }
+    #hud .keys-guide .kg-row.on span { color: #fff; }
     #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
     #overlay.hidden { display: none; }
     #overlay .menu { text-align: center; color: #fff; }
@@ -45,13 +56,17 @@
     #room-toast button { background: none; border: 1px solid #666; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 16px; }
     #room-toast button:hover { border-color: #fff; }
     #room-toast .toast-label { color: #aaa; font-size: 13px; font-weight: normal; letter-spacing: 0; }
+    #lock-hint { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 60; pointer-events: none; }
+    #lock-hint.hidden { display: none; }
+    #lock-hint .box { background: rgba(0,0,0,0.78); border: 2px solid #ff9800; border-radius: 8px; padding: 16px 30px; text-align: center; }
+    #lock-hint .box b { display: block; color: #ffb74d; font-size: 20px; letter-spacing: 3px; margin-bottom: 6px; }
+    #lock-hint .box span { color: #ddd; font-size: 13px; }
   </style>
 </head>
 <body>
   <canvas id="game-canvas"></canvas>
   <div id="hud">
-    <div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div>
-    <div class="hp-label" id="hp-label">Outpost: 100/100</div>
+    <div class="breach" id="breach-display">0<small>BREACHES</small></div>
     <div class="wave-info" id="wave-info">Horde incoming…</div>
     <div class="drone-status" id="drone-status">Press SPACE to launch</div>
     <div class="score" id="score-display">Score: 0</div>
@@ -70,6 +85,24 @@
       <div>DIST <b id="fl-dist">0</b> m</div>
       <div>TIME <b id="fl-time">0</b> s</div>
     </div>
+    <div class="keys-guide" id="keys-guide">
+      <div class="kg-title">FPV CONTROLS<small>press H to hide</small></div>
+      <div class="kg-row" id="kg-launch"><span class="kg-keys"><kbd>Space</kbd></span><span>Launch / ascend</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>W</kbd><kbd>S</kbd></span><span>Thrust fwd / back</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Yaw left / right</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>Mouse</kbd></span><span>Look (yaw + pitch)</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>Q</kbd><kbd>E</kbd></span><span>Pitch nose up / down</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>Shift</kbd></span><span>Descend</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>LMB</kbd></span><span>Boost (2&times;)</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>R</kbd></span><span>Self-destruct</span></div>
+    </div>
+  </div>
+  <div id="breach-flash"></div>
+  <div id="lock-hint" class="hidden">
+    <div class="box">
+      <b>MOUSE LOOK PAUSED</b>
+      <span>Click to take the controls back</span>
+    </div>
   </div>
   <div id="overlay">
     <div class="menu">
@@ -85,8 +118,9 @@
       <div class="controls">
         <strong>Drone Controls (FPV):</strong><br/>
         W/S — Forward/Back | A/D — Yaw (rotate) | Mouse — Yaw + Pitch<br/>
+        &uarr;/&darr; or Q/E — Pitch (tilt nose up/down)<br/>
         Space — Ascend | Shift — Descend | LMB — Boost | R — Self-destruct<br/>
-        <em>Space also launches drone when waiting</em>
+        <em>Space also launches drone when waiting · H hides the on-screen key guide</em>
       </div>
     </div>
   </div>

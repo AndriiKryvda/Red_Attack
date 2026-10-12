@@ -66,19 +66,27 @@ Open **http://localhost:5173** in your browser.
 | **A / D** | Yaw rotation (rotate drone left / right) |
 | **Mouse X** | Yaw rotation (additive with A/D) |
 | **Mouse Y** | Pitch (tilt nose up / down) |
+| **↑ / ↓** or **Q / E** | Pitch (tilt nose up / down) — keyboard equivalent of mouse Y |
 | **Space** | Ascend (throttle up) / Launch drone when waiting |
 | **Shift** | Descend (throttle down) |
 | **LMB** | Boost (2× speed) |
 | **R** | Self-destruct drone |
+| **H** | Show / hide the on-screen key guide (remembered between sessions) |
+| **Click** | Recapture the mouse after alt-tabbing away or pressing `Esc` |
 
 ### How to Fly
 
 1. **Launch** — Press `Space` while waiting at the outpost.
 2. **Turn** — Use `A`/`D` or move the mouse left/right to yaw the drone.
 3. **Altitude** — `Space` to ascend, `Shift` to descend.
-4. **Thrust** — `W` pushes forward in whatever direction the drone faces.
-5. **Strike** — Fly into enemies to detonate. Use boost (`LMB`) for speed.
-6. **Self-destruct** — Press `R` to detonate early (e.g., out of bounds).
+4. **Tilt** — hold `↑`/`↓` (or `Q`/`E`) to point the nose up or down without moving the mouse.
+5. **Thrust** — `W` pushes forward in whatever direction the drone faces, so tilt down + `W` = a dive.
+6. **Strike** — Fly into enemies to detonate. Use boost (`LMB`) for speed.
+7. **Self-destruct** — Press `R` to detonate early (e.g., out of bounds).
+8. **Alt-tab** — Leaving the window releases the mouse capture (that is how
+   browsers work). Coming back, the game re-grabs the mouse automatically; if
+   you pressed `Esc` instead, click once to resume mouse look. Keys held when
+   you left are released so the drone does not fly off on its own.
 
 ## Multiplayer
 

@@ -6,7 +6,6 @@ import {
   DRONE_MAX_FLIGHT_TIME, DRONE_MAX_DISTANCE, DRONE_RELOAD_TIME,
   DRONE_KILL_RADIUS, DRONE_SLOW_RADIUS, DRONE_SLOW_DURATION, DRONE_FREEZE_DURATION,
   ENEMY_STATS, ENEMY_DEATH_LINGER_TIME,
-  OUTPOST_HP_PER_PLAYER, ENEMY_TARRAM_DMG,
   MAX_ACTIVE_ENEMIES, TICK_RATE, MAX_PLAYERS,
   MULTI_KILL_BONUS, MULTI_KILL_THRESHOLD,
   HORDE_START_RATE, HORDE_MAX_RATE, HORDE_RAMP_TIME,
@@ -34,9 +33,7 @@ export class GameRoom extends Room {
   threatLevel: number = 1;
   elapsed: number = 0;        // seconds the horde has been pressing the fort
   kills: number = 0;
-  leaks: number = 0;
-  outpostHp: number = 100;
-  outpostMaxHp: number = 100;
+  leaks: number = 0;       // enemies that reached the fort — counted, never fatal
   serverTime: number = 0;
   roomCode: string = '';
 
@@ -78,7 +75,6 @@ export class GameRoom extends Room {
       lastInput: Date.now(),
     };
     this.players.set(id, player);
-    this.updateOutpostHp();
     console.log(`[Room] Player joined: ${player.name} (${id}). Total: ${this.players.size}`);
 
     if (this.phase === GamePhase.LOBBY && this.players.size >= 1) {
@@ -93,7 +89,6 @@ export class GameRoom extends Room {
       this.drones.delete(player.droneId);
     }
     this.players.delete(id);
-    this.updateOutpostHp();
   }
 
   onDispose() {
@@ -107,8 +102,7 @@ export class GameRoom extends Room {
     this.threatLevel = 1;
     this.elapsed = 0;
     this.spawnAccumulator = 0;
-    this.updateOutpostHp();
-    this.outpostHp = this.outpostMaxHp;
+    this.leaks = 0;
     this.broadcastEvent({ type: 'horde_start' });
     console.log(`[Horde] Room ${this.roomCode}: endless horde engaged`);
   }
@@ -148,6 +142,7 @@ export class GameRoom extends Room {
     if (HORDE_VICTORY_TIME > 0 && this.elapsed >= HORDE_VICTORY_TIME) this.endGame(true);
   }
 
+  /** Only reachable through HORDE_VICTORY_TIME — leaks never end the run. */
   private endGame(victory: boolean) {
     this.phase = victory ? GamePhase.VICTORY : GamePhase.DEFEAT;
     const scores: Record<string, number> = {};
@@ -226,17 +221,23 @@ export class GameRoom extends Room {
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       if (dist < 5) {
-        this.outpostHp -= ENEMY_TARRAM_DMG;
+        // Reached the fort: it counts as a breach and is consumed at the wall.
+        // There is no defeat condition — the horde presses on forever.
         this.leaks++;
-        enemy.dead = true;
-        enemy.deathTime = this.serverTime;
-        if (this.outpostHp <= 0) { this.outpostHp = 0; this.endGame(false); }
+        this.broadcastEvent({
+          type: 'enemy_breach', enemyId: enemy.id, enemyType: enemy.type,
+          position: { ...enemy.position }, leaks: this.leaks,
+        });
+        this.enemies.delete(id);
         continue;
       }
 
       enemy.position.x += (dx / dist) * speed * dt;
       enemy.position.z += (dz / dist) * speed * dt;
-      enemy.position.y = this.getHillHeight(enemy.position.x, enemy.position.z);
+      // The map is completely flat: enemies stay glued to the ground. The old
+      // hardcoded hill lifted them up to 15 m inside 40 m of the fort, which read
+      // as an invisible slope right in front of the walls.
+      enemy.position.y = 0;
     }
   }
 
@@ -402,21 +403,10 @@ export class GameRoom extends Room {
     return code;
   }
 
-  private updateOutpostHp() {
-    this.outpostMaxHp = OUTPOST_HP_PER_PLAYER * this.players.size;
-    if (this.outpostHp > this.outpostMaxHp) this.outpostHp = this.outpostMaxHp;
-  }
-
   private getActiveEnemyCount(): number {
     let count = 0;
     for (const e of this.enemies.values()) { if (!e.dead) count++; }
     return count;
-  }
-
-  private getHillHeight(x: number, z: number): number {
-    const dist = Math.sqrt(x * x + z * z);
-    if (dist > 40) return 0;
-    return Math.max(0, 15 * (1 - dist / 40));
   }
 
   // ─── Broadcasting ────────────────────────────────────────
@@ -427,7 +417,7 @@ export class GameRoom extends Room {
       elapsed: Math.floor(this.elapsed),
       enemiesAlive: this.getActiveEnemyCount(),
       kills: this.kills,
-      outpostHp: this.outpostHp, outpostMaxHp: this.outpostMaxHp,
+      leaks: this.leaks,
       playerCount: this.players.size,
       roomCode: this.roomCode,
       enemies: Array.from(this.enemies.values()).map(e => ({

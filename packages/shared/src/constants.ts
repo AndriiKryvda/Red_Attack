@@ -22,10 +22,8 @@ export const ENEMY_STATS: Record<EnemyType, { speed: number; hp: number; size: n
 export const ENEMY_DEATH_LINGER_TIME = 30; // seconds before dead enemies disappear
 
 // ─── Outpost ───────────────────────────────────────────────
-export const OUTPOST_HP_PER_PLAYER = 100;
-export const OUTPOST_WALL_HP_PER_PLAYER = 25;
-export const OUTPOST_WALLS = 4;
-export const ENEMY_TARRAM_DMG = 10;
+// The fort has no hit points: every enemy that reaches it is simply counted as a
+// breach (see GameRoom.leaks) and the horde keeps coming.
 
 // ─── Horde (endless escalating assault) ──────────────────
 // There are no discrete waves: enemies stream toward the fort continuously and
@@ -46,8 +44,7 @@ export const HORDE_BEAR_DELAY = 40;          // bears join the horde after 40 s
 
 // ─── Map ───────────────────────────────────────────────────
 export const MAP_SIZE = 300;             // meters (square)
-export const HILL_RADIUS = 0;            // meters (no hill)
-export const HILL_HEIGHT = 0;            // meters (no hill)
+// The map is completely flat: there is no hill anywhere on the field.
 export const OUTPOST_RADIUS = 15;        // meters (outpost footprint)
 export const HORDE_SPAWN_RING_MIN = 105;   // meters from center (nearest spawn arc)
 export const HORDE_SPAWN_RING_MAX = 140;   // meters from center (farthest spawn arc)

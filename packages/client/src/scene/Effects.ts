@@ -150,52 +150,53 @@ export class EffectsManager {
   }
 
   /**
-   * One puff of an ongoing vehicle fire: a flame tongue licking up off the wreck
-   * plus the odd ball of black smoke. Called over and over while an armoured
-   * enemy burns, so it stays deliberately cheap.
+   * One puff of an ongoing fire: a flame tongue licking up off the wreck or the
+   * roof of a burning building plus the odd ball of black smoke. Called over and
+   * over while something burns, so it stays deliberately cheap. `scale` sizes the
+   * flame — a house fire is bigger than a car fire.
    */
-  spawnFirePuff(x: number, y: number, z: number) {
+  spawnFirePuff(x: number, y: number, z: number, scale = 1) {
     const flame = new THREE.Mesh(
-      new THREE.SphereGeometry(0.2 + Math.random() * 0.25, 8, 6),
+      new THREE.SphereGeometry((0.2 + Math.random() * 0.25) * scale, 8, 6),
       new THREE.MeshBasicMaterial({
         color: Math.random() > 0.45 ? 0xff7a1a : 0xffc24a, transparent: true, opacity: 0.9,
       }),
     );
-    flame.position.set(x + (Math.random() - 0.5) * 0.6, y, z + (Math.random() - 0.5) * 0.6);
+    flame.position.set(x + (Math.random() - 0.5) * 0.6 * scale, y, z + (Math.random() - 0.5) * 0.6 * scale);
     this.scene.add(flame);
     this.particles.push({
       mesh: flame,
-      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.7, 1.6 + Math.random() * 1.4, (Math.random() - 0.5) * 0.7),
+      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.7 * scale, (1.6 + Math.random() * 1.4) * scale, (Math.random() - 0.5) * 0.7 * scale),
       life: 0, maxLife: 0.45 + Math.random() * 0.35, gravity: -1.5, grow: 1.6, baseOpacity: 0.9,
     });
 
     // Every other puff leaves a short column of dark smoke behind the flame.
     if (Math.random() > 0.45) {
       const smoke = new THREE.Mesh(
-        new THREE.SphereGeometry(0.35 + Math.random() * 0.3, 8, 6),
+        new THREE.SphereGeometry((0.35 + Math.random() * 0.3) * scale, 8, 6),
         new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.55 }),
       );
-      smoke.position.set(x + (Math.random() - 0.5) * 0.8, y + 0.5, z + (Math.random() - 0.5) * 0.8);
+      smoke.position.set(x + (Math.random() - 0.5) * 0.8 * scale, y + 0.5 * scale, z + (Math.random() - 0.5) * 0.8 * scale);
       this.scene.add(smoke);
       this.particles.push({
         mesh: smoke,
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.5, 2.2 + Math.random() * 1.2, (Math.random() - 0.5) * 0.5),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.5 * scale, (2.2 + Math.random() * 1.2) * scale, (Math.random() - 0.5) * 0.5 * scale),
         life: 0, maxLife: 2.2 + Math.random() * 1.2, gravity: -0.6, grow: 2.4, baseOpacity: 0.55,
       });
     }
   }
 
-  /** A lone column of black smoke, for a wreck whose open flame has died down. */
-  spawnSmokePuff(x: number, y: number, z: number) {
+  /** A lone column of black smoke, for a fire whose open flame has died down. */
+  spawnSmokePuff(x: number, y: number, z: number, scale = 1) {
     const smoke = new THREE.Mesh(
-      new THREE.SphereGeometry(0.3 + Math.random() * 0.3, 8, 6),
+      new THREE.SphereGeometry((0.3 + Math.random() * 0.3) * scale, 8, 6),
       new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.5 }),
     );
-    smoke.position.set(x + (Math.random() - 0.5) * 0.7, y + 0.3, z + (Math.random() - 0.5) * 0.7);
+    smoke.position.set(x + (Math.random() - 0.5) * 0.7 * scale, y + 0.3 * scale, z + (Math.random() - 0.5) * 0.7 * scale);
     this.scene.add(smoke);
     this.particles.push({
       mesh: smoke,
-      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.4, 1.8 + Math.random(), (Math.random() - 0.5) * 0.4),
+      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.4 * scale, (1.8 + Math.random()) * scale, (Math.random() - 0.5) * 0.4 * scale),
       life: 0, maxLife: 2.6 + Math.random() * 1.4, gravity: -0.5, grow: 2.6, baseOpacity: 0.5,
     });
   }

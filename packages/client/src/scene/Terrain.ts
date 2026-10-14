@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { standardMaterial } from './Textures';
-import { MAP_SIZE, OUTPOST_RADIUS } from '@red-attack/shared';
+import { MAP_SIZE, OUTPOST_RADIUS, villageCorridors } from '@red-attack/shared';
 
 // Deterministic PRNG (mulberry32): the forest is laid out identically on every
 // client and on every reload, so the horizon reads as a real wood instead of
@@ -20,6 +20,15 @@ const TREE_COUNT = 170;
 const TREE_MIN_SPACING = 5.5;               // meters between neighbouring trunks
 const TREE_MARGIN = 14;                     // keep trees inside the ground plane
 const CLEARING_RADIUS = OUTPOST_RADIUS + 6; // never block the fort approach
+/** The two village strips: no trunks through a wall the horde walks out of. */
+const VILLAGE_BLOCKS = villageCorridors();
+
+function inVillage(x: number, z: number): boolean {
+  for (const c of VILLAGE_BLOCKS) {
+    if (x >= c.minX && x <= c.maxX && z >= c.minZ && z <= c.maxZ) return true;
+  }
+  return false;
+}
 
 interface TreeSpot { x: number; z: number; scale: number; rot: number; }
 
@@ -33,6 +42,7 @@ function scatterTrees(rand: () => number): TreeSpot[] {
     const x = (rand() * 2 - 1) * half;
     const z = (rand() * 2 - 1) * half;
     if (Math.hypot(x, z) < CLEARING_RADIUS) continue;
+    if (inVillage(x, z)) continue;
     let ok = true;
     for (const s of spots) {
       const dx = s.x - x;

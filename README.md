@@ -1,6 +1,6 @@
 # 🔴 Red Attack
 
-A browser-based multiplayer FPV drone defense game. Players defend an outpost from an endless horde of enemies by launching and piloting kamikaze drones in first-person view.
+A browser-based multiplayer FPV drone defense game. Players defend an outpost from an endless horde of enemies by launching and piloting kamikaze drones in first-person view. The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
 
 ## Tech Stack
 
@@ -22,16 +22,21 @@ red-attack/
 │   │       ├── input/       # InputManager (keyboard + mouse)
 │   │       ├── network/     # Colyseus client wrapper
 │   │       ├── scene/       # Three.js scene, drone, enemies, terrain
+│   │       │                #   Outpost.ts / VillageModels.ts — the fort and the
+│   │       │                #   destructible village (models, flags, ruins)
+│   │       │                #   Structures.ts — client side of the village state
+│   │       │                #   VehicleModels.ts — horde vehicles
 │   │       ├── ui/          # HUD overlay
 │   │       └── main.ts      # Game loop
 │   ├── server/          # Colyseus game server
 │   │   └── src/
-│   │       ├── rooms/       # GameRoom (state, physics, horde)
+│   │       ├── rooms/       # GameRoom (state, physics, horde, village)
 │   │       └── index.ts     # HTTP + WebSocket entry
 │   └── shared/          # Shared types & game constants
 │       └── src/
 │           ├── types.ts
-│           └── constants.ts
+│           ├── constants.ts
+│           └── structures.ts  # STRUCTURE_SPECS, village layout, spawn edges
 ├── docs/                # Design documents
 └── package.json         # Workspace root
 ```
@@ -108,15 +113,21 @@ Open **http://localhost:5173** in your browser.
 | Reload time | 5 s |
 | Horde spawn rate | 0.35 → 1.6 enemies/s (ramps over 9 min, ×players) |
 | Threat level | +1 every 45 s |
-| Spawn directions | full 360°, out on the map border (142–149 m from the fort) |
+| Spawn directions | weighted to the village: 40% north, 40% east, 10% west, 10% south (out on the map border, 142–149 m from the fort) |
+| Door spawns | 75% of the spawns on a built-up side step out of a building doorway |
+| Village | 14 buildings + 12 parked cars, on the north and east edges 126 m out |
 | Wreckage burn | open flame ~14 s, smoke until 55 s, up to 12 piles at once |
 | Max players | 4 |
 
 ### Endless Horde
 
-There are no discrete waves. Enemies stream toward the fort continuously from a
-random bearing out on the map border (142–149 m out, so every enemy has to cross
-nearly the whole field), and the spawn rate climbs the longer the fort holds out.
+There are no discrete waves. Enemies stream toward the fort continuously out on
+the map border (142–149 m out, so every enemy has to cross nearly the whole
+field), and the spawn rate climbs the longer the fort holds out. The bearing is
+not uniform: four in ten come out of the east and four in ten out of the north —
+the two built-up sides — and most of those step out of a village doorway instead
+of off the open field (see [The Village](#the-village)).
+
 The three foot types — Cheburashka, soldier, bear — can show up in the very first
 seconds of a run; the vehicles join in only once the pilots have racked up enough
 kills (see the table below), and the HUD shouts `⚠ NEW ENEMY INCOMING` the moment
@@ -150,6 +161,47 @@ thing on the field; the tank rolls on tracked runs with a rotating turret and is
 the only unit that survives a hit. All three are built from primitives with
 rolling wheels, track links and decals so they stay readable during a 30 m/s
 pass.
+
+### The Village
+
+The fort stands in an open field, but the north and east sides of the map are
+lined with a strip of village: a row of buildings 126 m out
+(`VILLAGE_EDGE_OFFSET`) with cars parked on the road in front of them. It is enemy
+territory and it says so — every roof, gable and cab flies the Russian tricolor,
+while the fort flies the Ukrainian blue-and-yellow. That is a gameplay feature as
+much as set dressing: on a 30 m/s pass the tricolor is what tells a pilot which
+side of the line a shape belongs to.
+
+| Structure | Size W×D×H (m) | Hits | Score |
+|-----------|----------------|------|-------|
+| Sedan · Pickup · Van | 4.4–5.6 long | 1 | 15 · 18 · 20 |
+| Bus | 8.5 × 2.6 × 3.2 | 2 | 30 |
+| House | 8 × 7 × 6 | 2 | 40 |
+| Barn | 11 × 8 × 7 | 2 | 50 |
+| Water tower | 6 × 6 × 15 | 2 | 60 |
+| Apartment block | 14 × 9 × 12 | 3 | 90 |
+
+Each built-up side gets the same mix — 7 buildings and 6 parked cars — spaced
+along the strip with a little jitter, so no two runs look identical and a pilot who
+learned one layout still has to look.
+
+- **Cover for the horde.** Three quarters of the enemies that spawn on a built-up
+  side step out of a doorway (`HORDE_BUILDING_SPAWN_CHANCE`), scattered ±3.5 m
+  along the facade; the rest still walk in from the border.
+- **Solid.** A drone detonates against the same box the model fills, so a building
+  stops a strike that was aimed past it. Flagpoles, chimneys and roof vents are
+  decorative and reach above that box.
+- **They burn.** The first hit sets the whole structure alight and pays a quarter
+  of its worth; the last one drops it to a low, smoking ruin that stays for the rest
+  of the run, its flagpole bent into the rubble under a burnt flag. The apartment
+  block soaks three hits, so leveling it is a real commitment of drones.
+- **They reset** when a new game starts — rubble and all.
+
+All of it is client-side detail on top of three numbers. The server keeps only
+`hp` / `burning` / `destroyed` per structure; each client turns that into the model,
+the flame, the charred walls and the cloth. Cloth swings are driven per frame with a
+per-structure phase, so the village flutters out of step instead of snapping in
+unison, and a burning building chars its own flag rather than every flag on the map.
 
 ### Burning Wreckage
 

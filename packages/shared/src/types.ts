@@ -1,3 +1,6 @@
+import { StructureKind, StructureVariant } from './structures.js';
+
+
 // ─── Enemy Types ───────────────────────────────────────────
 export enum EnemyType {
   CHEBURASHKA = 'cheburashka',
@@ -32,6 +35,28 @@ export interface Vec3 {
   y: number;
   z: number;
 }
+// ─── Structure (village buildings and parked cars) ─────────
+/**
+ * A destructible prop on the edge of the map. Structures never move, so the whole
+ * record is static apart from `hp` / `burning` / `destroyed`: a drone hit sets it
+ * on fire, and its last hp turns it into rubble.
+ */
+export interface StructureData {
+  id: string;
+  kind: StructureKind;
+  /** Key into STRUCTURE_SPECS — the model on the client, the box on the server. */
+  variant: StructureVariant;
+  x: number;
+  z: number;
+  /** Yaw in radians; the facade (local +Z) faces the fort. */
+  yaw: number;
+  hp: number;
+  maxHp: number;
+  burning: boolean;
+  destroyed: boolean;
+}
+
+
 
 // ─── Enemy ─────────────────────────────────────────────────
 export interface EnemyData {
@@ -86,6 +111,8 @@ export interface GameState {
   playerCount: number;
   roomCode: string;
   enemies: EnemyData[];
+  structures: StructureData[];   // village buildings and parked cars (static)
+
   drones: DroneData[];
   players: PlayerData[];
   serverTime: number;
@@ -152,6 +179,28 @@ export interface EnemyHitEvent {
   maxHp: number;
   burning: boolean;
 }
+/** A drone hit a building or a car without levelling it — it is burning now. */
+export interface StructureHitEvent {
+  type: 'structure_hit';
+  structureId: string;
+  kind: StructureKind;
+  variant: StructureVariant;
+  position: Vec3;
+  hp: number;
+  maxHp: number;
+}
+
+/** A structure was levelled: the client swaps the model for a burning ruin. */
+export interface StructureDestroyedEvent {
+  type: 'structure_destroyed';
+  structureId: string;
+  kind: StructureKind;
+  variant: StructureVariant;
+  killerId: string;
+  position: Vec3;
+  score: number;
+}
+
 
 /** A new enemy type just crossed its kill threshold and started spawning. */
 export interface NewEnemyEvent {
@@ -188,6 +237,9 @@ export type ServerEvent =
   | ExplosionEvent
   | EnemyKilledEvent
   | EnemyHitEvent
+  | StructureHitEvent
+  | StructureDestroyedEvent
+
   | NewEnemyEvent
   | HordeStartEvent
   | ThreatLevelEvent

@@ -6,6 +6,7 @@ import { createOutpost } from './Outpost';
 import { EnemyRenderer } from './Enemy';
 import { DroneRenderer } from './Drone';
 import { EffectsManager } from './Effects';
+import { StructureRenderer } from './Structures';
 
 export class GameScene {
   private renderer: THREE.WebGLRenderer;
@@ -14,6 +15,7 @@ export class GameScene {
   private enemyRenderer: EnemyRenderer;
   private droneRenderer: DroneRenderer;
   private effects: EffectsManager;
+  private structureRenderer: StructureRenderer;
   private clock: THREE.Clock;
   private localPlayerId: string = '';
 
@@ -86,6 +88,7 @@ export class GameScene {
     this.enemyRenderer = new EnemyRenderer(this.scene);
     this.droneRenderer = new DroneRenderer(this.scene);
     this.effects = new EffectsManager(this.scene);
+    this.structureRenderer = new StructureRenderer(this.scene);
 
     this.clock = new THREE.Clock();
 
@@ -103,6 +106,15 @@ export class GameScene {
     // An armoured enemy that survived its first drone keeps burning: hand the
     // effects layer one flame puff per burning enemy per frame.
     this.enemyRenderer.sync(state.enemies, (x, y, z) => this.effects.spawnFirePuff(x, y, z));
+
+    // The village on the north and east edges: static models that burn, collapse
+    // and stay burnt for the rest of the run.
+    this.structureRenderer.sync(
+      state.structures ?? [],
+      (x, y, z, scale) => this.effects.spawnFirePuff(x, y, z, scale),
+      (x, y, z, scale) => this.effects.spawnSmokePuff(x, y, z, scale),
+      _dt,
+    );
 
     // Update drones. Remote drones get a per-pilot colour, a callsign tag and a
     // smoke trail so every pilot can see the others in the sky.
@@ -128,6 +140,10 @@ export class GameScene {
         // An enemy slipped through at the wall: mark it with a red puff so the
         // breach is visible without ending anything.
         this.effects.spawnTrailPuff(ev.position.x, ev.position.y + 0.8, ev.position.z, 0xff3b30);
+      } else if (ev.type === 'structure_destroyed') {
+        // A building coming down is a bigger affair than a drone hitting a tank:
+        // a full fireball and a smoke column over the rubble.
+        this.effects.spawnCrash(ev.position.x, 1.5, ev.position.z);
       }
     }
 

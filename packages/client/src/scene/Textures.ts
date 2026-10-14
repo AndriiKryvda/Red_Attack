@@ -547,7 +547,10 @@ export function standardMaterial(
   const mat = new THREE.MeshStandardMaterial({
     map: m.map,
     normalMap: m.normalMap,
-    roughnessMap: m.roughnessMap,
+    // Only hand three the roughness map when the set has one: several sets
+    // (metal, concrete) do not carry one, and three warns once per material when
+    // the property is present but undefined.
+    ...(m.roughnessMap ? { roughnessMap: m.roughnessMap } : {}),
     color: opts.color ?? 0xffffff,
     roughness: opts.roughness ?? 1,
     metalness: opts.metalness ?? 0,

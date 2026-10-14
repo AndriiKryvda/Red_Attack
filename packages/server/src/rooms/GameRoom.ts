@@ -2,6 +2,7 @@ import { Room, Client } from '@colyseus/core';
 import {
   GamePhase, PlayerState, EnemyType,
   EnemyData, DroneData, PlayerData, Vec3, ClientMessage,
+  StructureData, StructureVariant,
   DRONE_SPEED, DRONE_BOOST_MULTIPLIER, DRONE_BOOST_COOLDOWN,
   DRONE_MAX_FLIGHT_TIME, DRONE_MAX_DISTANCE, DRONE_RELOAD_TIME,
   DRONE_KILL_RADIUS, DRONE_SLOW_RADIUS, DRONE_SLOW_DURATION, DRONE_FREEZE_DURATION,
@@ -13,11 +14,27 @@ import {
   HORDE_SPAWN_BURST_MAX, HORDE_PLAYER_PRESSURE, HORDE_THREAT_INTERVAL,
   HORDE_VICTORY_TIME,
   HORDE_SPAWN_BORDER, HORDE_SPAWN_RING_MIN, HORDE_SPAWN_RING_MAX,
+  StructureKind, SpawnEdge, STRUCTURE_SPECS, BUILDING_VARIANTS, CAR_VARIANTS,
+  VILLAGE_EDGE_OFFSET, VILLAGE_SPREAD, VILLAGE_CAR_DEPTH, HORDE_BUILDING_SPAWN_CHANCE,
+  HORDE_DOOR_SPREAD, HORDE_DOOR_GAP, SPAWN_EDGE_ANGLE, SPAWN_EDGE_ARC, pickSpawnEdge,
 } from '@red-attack/shared';
 import { roomCodeRegistry } from '../index.js';
 
 interface InternalEnemy extends EnemyData {
   targetPos: Vec3;
+}
+
+interface InternalStructure extends StructureData {
+  /** Collision half-extents in world space, meters (y is the box centre). */
+  hx: number;
+  hy: number;
+  hz: number;
+  cy: number;
+  /** Side of the map it stands on; the horde walks out of a building on this edge. */
+  edge: SpawnEdge;
+  /** Doorway: the point in front of the facade its enemies step out to. */
+  doorX: number;
+  doorZ: number;
 }
 
 interface InternalDrone extends DroneData {
@@ -47,9 +64,13 @@ export class GameRoom extends Room {
   enemies: Map<string, InternalEnemy> = new Map();
   drones: Map<string, InternalDrone> = new Map();
   players: Map<string, InternalPlayer> = new Map();
+  /** The village on the north and east edges, and the doorways the horde uses. */
+  structures: Map<string, InternalStructure> = new Map();
+  doors: Map<SpawnEdge, InternalStructure[]> = new Map();
 
   private spawnAccumulator: number = 0;
   private idCounter: number = 0;
+  private structureIdCounter: number = 0;
   /** Enemy types whose kill threshold has been reached (and announced). */
   private unlockedEnemies: Set<EnemyType> = new Set();
 
@@ -59,6 +80,9 @@ export class GameRoom extends Room {
     this.maxClients = MAX_PLAYERS;
     this.setPatchRate(TICK_RATE);
     this.setSimulationInterval(() => this.tick(), TICK_RATE);
+    // The village is part of the map, so it has to stand there before the first
+    // pilot ever launches a drone at it.
+    this.buildVillage();
 
     // Generate a 4-char room code for sharing
     this.roomCode = this.generateRoomCode();
@@ -114,6 +138,7 @@ export class GameRoom extends Room {
     this.leaks = 0;
     this.kills = 0;
     this.unlockedEnemies.clear();
+    this.buildVillage();
     this.broadcastEvent({ type: 'horde_start' });
     console.log(`[Horde] Room ${this.roomCode}: endless horde engaged`);
   }
@@ -215,22 +240,10 @@ export class GameRoom extends Room {
 
   private spawnEnemy(type: EnemyType) {
     const stats = ENEMY_STATS[type];
-    // Border spawn: pick a bearing, walk it out to the edge of the map and drop
-    // the enemy there, so the horde has to cross the whole field instead of
-    // appearing halfway to the wall. The square edge is rounded off at
-    // HORDE_SPAWN_RING_MAX so nobody spawns in a far corner out of drone reach,
-    // and the ring minimum gives the back of a spawn pack some spread.
-    const angle = Math.random() * Math.PI * 2;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const edge = HORDE_SPAWN_BORDER / Math.max(Math.abs(cos), Math.abs(sin));
-    const dist = Math.min(edge, HORDE_SPAWN_RING_MAX)
-      - Math.random() * (HORDE_SPAWN_RING_MAX - HORDE_SPAWN_RING_MIN);
-    const pos: Vec3 = {
-      x: cos * dist,
-      y: 0,
-      z: sin * dist,
-    };
+    // Four in ten of the horde comes out of the north, four in ten out of the
+    // east, and only a tenth each across the open west and south fields.
+    const edge = pickSpawnEdge();
+    const pos = this.spawnPointFor(edge);
     const enemy: InternalEnemy = {
       id: `e_${this.idCounter++}`, type, position: pos,
       hp: stats.hp, maxHp: stats.hp, speed: stats.speed,
@@ -238,6 +251,168 @@ export class GameRoom extends Room {
       targetPos: { x: 0, y: 0, z: 0 },
     };
     this.enemies.set(enemy.id, enemy);
+  }
+
+  // ─── Village: the built-up north and east edges ──────────
+  /**
+   * Lay out the two strips of village the horde comes out of: a row of buildings
+   * on a line VILLAGE_EDGE_OFFSET out from the fort, cars parked on the road in
+   * front of them. Both edges get the same mix so a strike from the tower reads the
+   * same either way. Rebuilding on every start resets the rubble.
+   */
+  private buildVillage() {
+    this.structures.clear();
+    this.doors.clear();
+    this.structureIdCounter = 0;
+    this.buildEdge(SpawnEdge.NORTH);
+    this.buildEdge(SpawnEdge.EAST);
+  }
+
+  private buildEdge(edge: SpawnEdge) {
+    // Outward normal of the side; the along-axis is that normal turned a quarter
+    // turn, so `t` measures along the strip and `out` measures away from the fort
+    // (a negative `out` brings a car forward onto the road).
+    const outX = edge === SpawnEdge.EAST ? 1 : edge === SpawnEdge.WEST ? -1 : 0;
+    const outZ = edge === SpawnEdge.SOUTH ? 1 : edge === SpawnEdge.NORTH ? -1 : 0;
+    const alongX = -outZ;
+    const alongZ = outX;
+    // Turns a model's facade (local +Z) so that it faces the fort.
+    const yaw = Math.atan2(-outX, -outZ);
+    const spot = (i: number, count: number, out: number) => {
+      const step = (VILLAGE_SPREAD * 2) / count;
+      const t = -VILLAGE_SPREAD + step * (i + 0.5) + (Math.random() - 0.5) * step * 0.4;
+      return {
+        x: outX * (VILLAGE_EDGE_OFFSET + out) + alongX * t,
+        z: outZ * (VILLAGE_EDGE_OFFSET + out) + alongZ * t,
+      };
+    };
+
+    BUILDING_VARIANTS.forEach((variant, i) => {
+      const p = spot(i, BUILDING_VARIANTS.length, 0);
+      this.addStructure(variant, edge, yaw, p.x, p.z);
+    });
+    CAR_VARIANTS.forEach((variant, i) => {
+      // Parked between the fort and the buildings, nose turned a little off square.
+      const p = spot(i, CAR_VARIANTS.length, -(7 + Math.random() * (VILLAGE_CAR_DEPTH - 7)));
+      this.addStructure(variant, edge, yaw + (Math.random() - 0.5) * 0.6, p.x, p.z);
+    });
+  }
+
+  private addStructure(
+    variant: StructureVariant, edge: SpawnEdge, yaw: number, x: number, z: number,
+  ) {
+    const spec = STRUCTURE_SPECS[variant];
+    // Half-extents of the box the rotated footprint fits inside: the collision test
+    // is axis-aligned, so a car parked at an angle gets the slightly wider box.
+    const c = Math.abs(Math.cos(yaw));
+    const s = Math.abs(Math.sin(yaw));
+    const doorGap = spec.depth / 2 + HORDE_DOOR_GAP;
+    const structure: InternalStructure = {
+      id: `s_${this.structureIdCounter++}`,
+      kind: spec.kind, variant, x, z, yaw,
+      hp: spec.hp, maxHp: spec.hp, burning: false, destroyed: false,
+      hx: (c * spec.width + s * spec.depth) / 2,
+      hy: spec.height / 2,
+      hz: (s * spec.width + c * spec.depth) / 2,
+      cy: spec.height / 2,
+      edge,
+      doorX: x + Math.sin(yaw) * doorGap,
+      doorZ: z + Math.cos(yaw) * doorGap,
+    };
+    this.structures.set(structure.id, structure);
+    if (spec.kind === StructureKind.BUILDING) {
+      const list = this.doors.get(edge);
+      if (list) list.push(structure);
+      else this.doors.set(edge, [structure]);
+    }
+  }
+
+  /**
+   * Where a new enemy appears on a side. Most of the north/east horde walks out of
+   * a doorway — the village is their staging ground — and the rest, plus all of the
+   * open west and south sides, come in off the map border.
+   */
+  private spawnPointFor(edge: SpawnEdge): Vec3 {
+    const doors = this.doors.get(edge);
+    if (doors && doors.length > 0 && Math.random() < HORDE_BUILDING_SPAWN_CHANCE) {
+      const door = doors[(Math.random() * doors.length) | 0];
+      // Scatter sideways along the facade, which runs at right angles to the way
+      // the door faces.
+      const side = (Math.random() * 2 - 1) * HORDE_DOOR_SPREAD;
+      return {
+        x: door.doorX + Math.cos(door.yaw) * side,
+        y: 0,
+        z: door.doorZ - Math.sin(door.yaw) * side,
+      };
+    }
+    return this.borderPointFor(edge);
+  }
+
+  /**
+   * Border spawn restricted to one side: pick a bearing near that side's normal and
+   * walk it out to the square edge, so the horde still has to cross the whole field
+   * instead of appearing halfway to the wall. The edge is rounded off at
+   * HORDE_SPAWN_RING_MAX so nobody spawns in a far corner out of drone reach, and
+   * the ring minimum gives the back of a spawn pack some spread.
+   */
+  private borderPointFor(edge: SpawnEdge): Vec3 {
+    const angle = SPAWN_EDGE_ANGLE[edge] + (Math.random() * 2 - 1) * SPAWN_EDGE_ARC;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const border = HORDE_SPAWN_BORDER / Math.max(Math.abs(cos), Math.abs(sin));
+    const dist = Math.min(border, HORDE_SPAWN_RING_MAX)
+      - Math.random() * (HORDE_SPAWN_RING_MAX - HORDE_SPAWN_RING_MIN);
+    return { x: cos * dist, y: 0, z: sin * dist };
+  }
+
+  /**
+   * A quad that flies into a building or a parked car detonates on it. The box is
+   * the structure's footprint; rubble keeps a low box, so a ruin still has to be
+   * flown over instead of straight through.
+   */
+  private checkStructureHits(drone: InternalDrone): number {
+    const r = DRONE_KILL_RADIUS;
+    let contacts = 0;
+    for (const st of this.structures.values()) {
+      const dx = Math.max(Math.abs(drone.position.x - st.x) - st.hx, 0);
+      const dy = Math.max(Math.abs(drone.position.y - st.cy) - st.hy, 0);
+      const dz = Math.max(Math.abs(drone.position.z - st.z) - st.hz, 0);
+      if (dx * dx + dy * dy + dz * dz > r * r) continue;
+      this.damageStructure(st, drone.ownerId);
+      contacts++;
+    }
+    return contacts;
+  }
+
+  /**
+   * One detonation against a structure: the first hit sets the whole thing alight
+   * and pays a share of its worth, the last one leaves it as a burning heap.
+   */
+  private damageStructure(st: InternalStructure, killerId: string) {
+    if (st.destroyed) return;
+    const spec = STRUCTURE_SPECS[st.variant];
+    const player = this.players.get(killerId);
+    st.hp = Math.max(0, st.hp - 1);
+    st.burning = true;
+
+    if (st.hp > 0) {
+      if (player) player.score += Math.round(spec.score * ARMOUR_HIT_SCORE_SHARE);
+      this.broadcastEvent({
+        type: 'structure_hit', structureId: st.id, kind: st.kind, variant: st.variant,
+        position: { x: st.x, y: st.cy, z: st.z }, hp: st.hp, maxHp: st.maxHp,
+      });
+      return;
+    }
+
+    st.destroyed = true;
+    // What is left of it is a smoking heap a metre or so high now.
+    st.hy = Math.min(st.hy, 1.2);
+    st.cy = st.hy;
+    if (player) player.score += spec.score;
+    this.broadcastEvent({
+      type: 'structure_destroyed', structureId: st.id, kind: st.kind, variant: st.variant,
+      killerId, position: { x: st.x, y: 0, z: st.z }, score: spec.score,
+    });
   }
 
   private tickEnemies() {
@@ -320,6 +495,10 @@ export class GameRoom extends Room {
     let contacts = 0;
     const killRadiusSq = DRONE_KILL_RADIUS * DRONE_KILL_RADIUS;
     const slowRadiusSq = DRONE_SLOW_RADIUS * DRONE_SLOW_RADIUS;
+
+    // The village is solid: a quad that flies into a wall detonates there instead
+    // of passing straight through to the enemy standing behind it.
+    contacts += this.checkStructureHits(drone);
 
     for (const [, enemy] of this.enemies) {
       if (enemy.dead) continue;
@@ -494,6 +673,10 @@ export class GameRoom extends Room {
         hp: e.hp, maxHp: e.maxHp, speed: e.speed,
         slowedUntil: e.slowedUntil, frozenUntil: e.frozenUntil,
         dead: e.dead, deathTime: e.deathTime, burning: e.burning,
+      })),
+      structures: Array.from(this.structures.values()).map(s => ({
+        id: s.id, kind: s.kind, variant: s.variant, x: s.x, z: s.z, yaw: s.yaw,
+        hp: s.hp, maxHp: s.maxHp, burning: s.burning, destroyed: s.destroyed,
       })),
       drones: Array.from(this.drones.values()).map(d => ({
         id: d.id, ownerId: d.ownerId, position: d.position,

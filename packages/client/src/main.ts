@@ -2,7 +2,7 @@ import { GameScene } from './scene/Scene';
 import { NetworkClient } from './network/Client';
 import { InputManager } from './input/InputManager';
 import { HUD } from './ui/HUD';
-import { ENEMY_DISPLAY_NAMES } from '@red-attack/shared';
+import { ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS } from '@red-attack/shared';
 
 // ─── Bootstrap ─────────────────────────────────────────────
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -142,6 +142,11 @@ network.onEvent((event) => {
     hud.showAnnouncement(`⚠ NEW ENEMY INCOMING: ${ENEMY_DISPLAY_NAMES[event.enemyType]}`);
   } else if (event.type === 'enemy_hit') {
     hud.showAnnouncement('🔥 TARGET IGNITED - ONE MORE DRONE');
+  } else if (event.type === 'structure_hit') {
+    // The building is still standing, but it is burning and worth another pass.
+    hud.showAnnouncement(`🔥 ${STRUCTURE_SPECS[event.variant].label} ON FIRE`);
+  } else if (event.type === 'structure_destroyed') {
+    hud.showAnnouncement(`💥 ${STRUCTURE_SPECS[event.variant].label} DESTROYED +${event.score}`);
   } else if (event.type === 'enemy_breach') {
     // Enemies reaching the fort are only counted — the fight never stops.
     // Announce milestones so a late-game burst of leaks doesn't spam the screen.

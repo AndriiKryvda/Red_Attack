@@ -233,12 +233,14 @@ Run the built game on the box:
 
 ```bash
 npm run start            # one process: game server + built client on 0.0.0.0:2567
-npm run preview:client   # optional: serve the client separately on 0.0.0.0:5173
+npm run start:all        # the same, plus a separate Vite preview on 0.0.0.0:5173
+npm run preview:client   # only the client, on 0.0.0.0:5173
 ```
 
 `npm run start` also mounts `packages/client/dist` on the game-server port, so
-`http://<host>:2567/` is all you need - the client dials `:2567` anyway. When the
-dist folder is missing the server still starts and logs a hint instead.
+`http://<host>:2567/` is all you need - the client dials `:2567` anyway, and nothing
+listens on 5173 unless you run one of the client commands above. When the dist folder
+is missing the server still starts and logs a hint instead.
 
 Every workspace script is a plain `cd packages/<name> && npm run <script>`, so it
 behaves the same on any npm from 7 up (npm 6 silently mangles `npm run -w`, which

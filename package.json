@@ -2,12 +2,17 @@
   "name": "red-attack",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "workspaces": [
     "packages/shared",
     "packages/server",
     "packages/client"
   ],
   "scripts": {
+    "preinstall": "node scripts/check-engines.js",
     "dev": "npm run build:shared && concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm run dev -w packages/server",
     "dev:client": "npm run dev -w packages/client",

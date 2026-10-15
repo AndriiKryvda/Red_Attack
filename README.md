@@ -43,11 +43,11 @@ red-attack/
 
 ## Quick Start
 
-Requires **Node 18+ / npm 9+** (npm 7+ is needed for the `workspaces` field; the
-root scripts use `npm run -w <package>`). On an older npm the `-w` flag is
-ignored and `npm run build` recurses forever, so `.npmrc` sets
-`engine-strict=true` and such a toolchain fails at `npm install` with a clear
-message instead. Run `nvm use` to pick up the version in `.nvmrc`.
+Requires **Node 22+ / npm 9+** (`@colyseus/core` needs Node 22, and npm 7+ is
+needed for the `workspaces` field; the root scripts use `npm run -w <package>`).
+On an older npm the `-w` flag is ignored and `npm run build` recurses forever, so
+`.npmrc` sets `engine-strict=true` and such a toolchain fails at `npm install`
+with a clear message instead. Run `nvm use` to pick up the version in `.nvmrc`.
 
 ```bash
 # Install dependencies

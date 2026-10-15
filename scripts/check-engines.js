@@ -9,7 +9,7 @@
 // is the belt-and-braces version of it, so the failure is always a readable
 // message instead of an endless loop.
 
-const MIN_NODE = [18, 0, 0];
+const MIN_NODE = [22, 0, 0];
 const MIN_NPM = [9, 0, 0];
 
 function parseVersion(value) {
@@ -64,7 +64,7 @@ function main() {
   console.error(
     '\nThe workspace scripts use "npm run -w <package>", which npm 6 and older\n' +
     'silently ignore — that makes "npm run build" recurse forever.\n' +
-    'Install Node 18 or newer (nvm install && nvm use) and run npm install again.\n'
+    'Install Node 22 or newer (nvm install 22 && nvm use 22) and run npm install again.\n'
   );
   process.exit(1);
 }

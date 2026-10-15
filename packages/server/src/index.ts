@@ -1,5 +1,8 @@
 import express from 'express';
 import http from 'http';
+import path from 'path';
+import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
 import cors from 'cors';
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
@@ -40,6 +43,18 @@ app.get('/room/:code', (req, res) => {
   }
   res.json({ roomId, exists: true });
 });
+
+// Serve the built client (npm run build:client) from the same port as the game
+// server, so one process can host the whole game: http://<host>:2567/ . Registered
+// after the API routes so /health, /join and /room keep precedence.
+const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
+if (existsSync(path.join(clientDist, 'index.html'))) {
+  app.use(express.static(clientDist));
+  console.log(`[Red Attack] Serving client from ${clientDist}`);
+} else {
+  console.log('[Red Attack] No built client in packages/client/dist - run "npm run build:client",');
+  console.log('               or serve the client separately with "npm run preview:client" (port 5173).');
+}
 
 gameServer.listen(SERVER_PORT, '0.0.0.0').catch((err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {

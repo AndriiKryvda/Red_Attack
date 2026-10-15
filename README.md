@@ -232,9 +232,13 @@ Output: `packages/client/dist/` (static files) + compiled server in
 Run the built game on the box:
 
 ```bash
-npm run start            # game server on 0.0.0.0:2567
-npm run preview:client   # serves packages/client/dist on 0.0.0.0:5173
+npm run start            # one process: game server + built client on 0.0.0.0:2567
+npm run preview:client   # optional: serve the client separately on 0.0.0.0:5173
 ```
+
+`npm run start` also mounts `packages/client/dist` on the game-server port, so
+`http://<host>:2567/` is all you need - the client dials `:2567` anyway. When the
+dist folder is missing the server still starts and logs a hint instead.
 
 Every workspace script is a plain `cd packages/<name> && npm run <script>`, so it
 behaves the same on any npm from 7 up (npm 6 silently mangles `npm run -w`, which
@@ -295,10 +299,11 @@ The game needs **two TCP ports and no UDP**. Both processes already bind to
 
 | Router (external) | Forward to (LAN) | Protocol | What it carries |
 |-------------------|------------------|----------|-----------------|
-| **2567** | `<server LAN IP>:2567` | TCP | Colyseus game server: the gameplay WebSocket **and** the room-code HTTP lookups (`/join/:code`, `/room/:code`, `/health`) |
-| **5173** | `<server LAN IP>:5173` | TCP | The web client itself — the page and the JS bundle (Vite dev server) |
+| **2567** | `<server LAN IP>:2567` | TCP | Everything `npm run start` serves: the built client at `/`, the gameplay WebSocket and the room-code lookups (`/join/:code`, `/room/:code`, `/health`) |
+| **5173** | `<server LAN IP>:5173` | TCP | Only when the client is served separately (`npm run dev:client` / `npm run preview:client`) |
 
-Players then visit `http://<your-public-ip-or-domain>:5173`, create or join a room
+Players then visit `http://<your-public-ip-or-domain>:2567` (or `:5173` when the
+client is served separately), create or join a room
 code, and the browser opens its own WebSocket straight back to port 2567.
 
 ### Why port 2567 must stay 2567
@@ -337,8 +342,8 @@ mapping is unchanged.
 ### Firewall on the Linux box
 
 ```bash
-sudo ufw allow 5173/tcp   # or 80/tcp when serving the built client
-sudo ufw allow 2567/tcp
+sudo ufw allow 2567/tcp   # game server + built client (single port)
+sudo ufw allow 5173/tcp   # only if the client is served separately
 ```
 
 ### Pre-flight checklist
@@ -350,17 +355,19 @@ sudo ufw allow 2567/tcp
 - Verify from outside your own LAN (not from a device on the same network):
   ```bash
   curl http://<public-ip>:2567/health   # → {"status":"ok","game":"Red Attack"}
-  curl -I http://<public-ip>:5173
+  curl -I http://<public-ip>:2567/      # → 200, the built client
   ```
 - Do not open SSH (22) as part of this. Keep it LAN-only or key-gated.
 
-### Want to publish a single port?
+### Serving the client and the game from one port
 
-`packages/client/vite.config.ts` contains a `'/ws'` proxy to `ws://localhost:2567`,
-but nothing uses it — the client dials port 2567 directly. Collapsing to one port
-requires changing `NetworkClient` to a same-origin endpoint (`/ws`) and proxying
-both HTTP and WebSocket through one front door (nginx/Caddy). That is also the
-right time to add TLS.
+`npm run start` already does this: the built client, the gameplay WebSocket and the
+room-code endpoints all answer on `2567`, so a single port forward is enough. The
+remaining step for a true same-origin setup (one HTTPS front door, no `:2567` in the
+URL) is to switch `NetworkClient` in `packages/client/src/network/Client.ts` to a
+relative `/ws` endpoint and proxy HTTP + WebSocket through nginx/Caddy with TLS.
+The `'/ws'` proxy in `packages/client/vite.config.ts` only applies to the Vite dev
+server today.
 
 ## License
 

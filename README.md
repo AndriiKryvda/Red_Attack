@@ -47,7 +47,8 @@ Requires **Node 22+ / npm 9+** (`@colyseus/core` needs Node 22, and npm 7+ is
 needed for the `workspaces` field; the root scripts use `npm run -w <package>`).
 On an older npm the `-w` flag is ignored and `npm run build` recurses forever, so
 `.npmrc` sets `engine-strict=true` and such a toolchain fails at `npm install`
-with a clear message instead. Run `nvm use` to pick up the version in `.nvmrc`.
+with a clear message instead. Use `nvm use` to pick up the version in `.nvmrc`, or
+see [Installing Node 22 on the Linux server](#installing-node-22-on-the-linux-server).
 
 ```bash
 # Install dependencies
@@ -226,7 +227,40 @@ it costs no bandwidth and no server state.
 npm run build
 ```
 
-Output: `packages/client/dist/` (static files) + compiled server.
+Output: `packages/client/dist/` (static files) + compiled server. Requires the Node 22
+toolchain described below.
+
+### Installing Node 22 on the Linux server
+
+Ubuntu's own `nodejs` apt package is far too old (20.04 ships Node 10 / npm 6).
+npm 6 ignores the `workspaces` field and the `-w` flag, so `npm run build`
+recurses into itself forever; `@colyseus/core` also needs Node 22 to even start.
+`.npmrc` sets `engine-strict=true`, so an old toolchain now stops with
+`ENOTSUP Unsupported engine` instead of looping.
+
+Install Node 22 system-wide from NodeSource (needs sudo, glibc >= 2.28):
+
+```bash
+node -v && npm -v                       # note what you have now
+sudo apt-get remove -y nodejs npm       # drop the distro package first
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs          # ships Node 22 + npm 10
+hash -r                                 # clear bash's cached /usr/bin/node
+node -v && npm -v                       # must be v22.x / 10.x
+```
+
+Then rebuild from a clean tree:
+
+```bash
+cd ~/Red_Attack && git pull
+rm -rf node_modules && npm install && npm run build
+ls -l node_modules/@red-attack          # symlinks into ../../packages/*
+ls packages/client/dist                 # index.html + assets/
+```
+
+If a systemd unit runs the game server, point `ExecStart=` at the new binary
+(`/usr/bin/node` after this install) and reload with
+`sudo systemctl daemon-reload && sudo systemctl restart red-attack`.
 
 ## Hosting on a Home Server (Router Port Forwarding)
 

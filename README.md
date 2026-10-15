@@ -43,12 +43,11 @@ red-attack/
 
 ## Quick Start
 
-Requires **Node 22+ / npm 9+** (`@colyseus/core` needs Node 22, and npm 7+ is
-needed for the `workspaces` field; the root scripts use `npm run -w <package>`).
-On an older npm the `-w` flag is ignored and `npm run build` recurses forever, so
-`.npmrc` sets `engine-strict=true` and such a toolchain fails at `npm install`
-with a clear message instead. Use `nvm use` to pick up the version in `.nvmrc`, or
-see [Installing Node 22 on the Linux server](#installing-node-22-on-the-linux-server).
+Requires **Node 22+ / npm 9+**: `@colyseus/core` needs Node 22, and npm 7+ is needed
+to link the workspace packages into `node_modules`. `scripts/check-engines.js` runs
+on `preinstall` and refuses an older toolchain with an explanation (override with
+`SKIP_ENGINES_CHECK=1`). Use `nvm use` to pick up the version in `.nvmrc`, or see
+[Installing Node 22 on the Linux server](#installing-node-22-on-the-linux-server).
 
 ```bash
 # Install dependencies
@@ -227,18 +226,30 @@ it costs no bandwidth and no server state.
 npm run build
 ```
 
-Output: `packages/client/dist/` (static files) + compiled server. Requires the Node 22
-toolchain described below.
+Output: `packages/client/dist/` (static files) + compiled server in
+`packages/server/dist/`. Needs the Node 22 toolchain described below.
+
+Run the built game on the box:
+
+```bash
+npm run start            # game server on 0.0.0.0:2567
+npm run preview:client   # serves packages/client/dist on 0.0.0.0:5173
+```
+
+Every workspace script is a plain `cd packages/<name> && npm run <script>`, so it
+behaves the same on any npm from 7 up (npm 6 silently mangles `npm run -w`, which
+is what made the old build recurse into itself forever). npm 7+ is still required,
+because only it links the `@red-attack/*` workspace packages into `node_modules`.
 
 ### Installing Node 22 on the Linux server
 
-Ubuntu's own `nodejs` apt package is far too old (20.04 ships Node 10 / npm 6).
-npm 6 ignores the `workspaces` field and the `-w` flag, so `npm run build`
-recurses into itself forever; `@colyseus/core` also needs Node 22 to even start.
-`.npmrc` sets `engine-strict=true`, so an old toolchain now stops with
-`ENOTSUP Unsupported engine` instead of looping.
+Ubuntu's own `nodejs` apt package is far too old (20.04 ships Node 10 / npm 6),
+and `@colyseus/core` 0.18 needs Node 22 to even start. `scripts/check-engines.js`
+runs on `preinstall` and stops an old toolchain with an explanation instead of a
+cryptic crash; `SKIP_ENGINES_CHECK=1 npm install` overrides it if you insist.
 
-Install Node 22 system-wide from NodeSource (needs sudo, glibc >= 2.28):
+Install Node 22 system-wide from NodeSource (needs sudo, glibc >= 2.28, and amd64
+or arm64 - it works on a Banana Pi M5):
 
 ```bash
 node -v && npm -v                       # note what you have now
@@ -247,6 +258,20 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs          # ships Node 22 + npm 10
 hash -r                                 # clear bash's cached /usr/bin/node
 node -v && npm -v                       # must be v22.x / 10.x
+```
+
+The `| sudo -E bash -` pipe is not optional: running the bare `curl` URL only
+prints the script and installs nothing.
+
+No sudo, or NodeSource unreachable? Unpack the official tarball instead - use
+`linux-arm64` on a 64-bit ARM board, `linux-x64` on a PC:
+
+```bash
+cd /tmp
+curl -fLO https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-arm64.tar.xz
+mkdir -p ~/.local && tar -xJf node-v22.23.1-linux-arm64.tar.xz -C ~/.local
+echo 'export PATH="$HOME/.local/node-v22.23.1-linux-arm64/bin:$PATH"' >> ~/.bashrc
+exec bash && node -v && npm -v
 ```
 
 Then rebuild from a clean tree:
@@ -259,7 +284,8 @@ ls packages/client/dist                 # index.html + assets/
 ```
 
 If a systemd unit runs the game server, point `ExecStart=` at the new binary
-(`/usr/bin/node` after this install) and reload with
+(`/usr/bin/node` after a NodeSource install, or `~/.local/node-*/bin/node` for the
+tarball) and reload with
 `sudo systemctl daemon-reload && sudo systemctl restart red-attack`.
 
 ## Hosting on a Home Server (Router Port Forwarding)

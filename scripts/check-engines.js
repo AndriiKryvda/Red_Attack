@@ -59,12 +59,25 @@ function main() {
   for (const note of notes) console.warn(`check-engines: ${note}`);
   if (problems.length === 0) return;
 
+  if (process.env.SKIP_ENGINES_CHECK) {
+    console.warn(
+      '\ncheck-engines: version gate skipped because SKIP_ENGINES_CHECK is set.\n' +
+      'Expect the build to fail anyway: Vite 5 needs Node 18+ and\n' +
+      '@colyseus/core 0.18 needs Node 22.\n'
+    );
+    return;
+  }
+
   console.error('\n*** Red Attack needs a newer Node / npm ***');
   for (const problem of problems) console.error(` - ${problem}`);
   console.error(
-    '\nThe workspace scripts use "npm run -w <package>", which npm 6 and older\n' +
-    'silently ignore — that makes "npm run build" recurse forever.\n' +
-    'Install Node 22 or newer (nvm install 22 && nvm use 22) and run npm install again.\n'
+    '\nThis project needs Node 22: Vite 5 requires Node 18+ and @colyseus/core 0.18\n' +
+    'requires Node 22. Install it, then run npm install again:\n' +
+    '  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -\n' +
+    '  sudo apt-get install -y nodejs\n' +
+    'No sudo? Unpack the linux-arm64 / linux-x64 tarball from nodejs.org into\n' +
+    '~/.local and put its bin/ first on PATH.\n' +
+    'To install anyway at your own risk: SKIP_ENGINES_CHECK=1 npm install\n'
   );
   process.exit(1);
 }

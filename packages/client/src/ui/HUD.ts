@@ -100,7 +100,7 @@ export class HUD {
         // The tube is laid and loaded, and the crosshair doubles as its aim ray.
         this.droneStatus.textContent = mortarWait > 0
           ? `⏳ Mortar reload: ${mortarWait}s`
-          : '💥 Press SPACE to fire';
+          : '💥 Press SPACE / LMB to fire';
         this.crosshair.classList.add('show');
       } else if (player.state === PlayerState.COOLDOWN) {
         this.droneStatus.textContent = `⏳ Reload: ${droneWait}s`;

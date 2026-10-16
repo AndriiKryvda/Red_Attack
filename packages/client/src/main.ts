@@ -34,13 +34,20 @@ function localPlayer() {
 // Space is the fire button for whichever weapon the pilot is manning: it launches
 // the quad, or it sends a shell from the mortar at wherever the fort view is
 // pointing. The server clamps the shot into the ring of fire either way.
-input.onLaunch = () => {
+function fireWeapon() {
   if (localPlayer()?.weapon === WeaponType.MORTAR) {
     const aim = scene.getMortarAim();
     network.sendMortarFire(aim.x, aim.z);
   } else {
     network.sendLaunch();
   }
+}
+input.onLaunch = () => { fireWeapon(); };
+// The left mouse button is the tube's trigger too. With the quad manned the click
+// stays what it always was — boost — so the mouse never launches a drone behind
+// the pilot's back.
+input.onFireMouse = () => {
+  if (localPlayer()?.weapon === WeaponType.MORTAR) fireWeapon();
 };
 input.onSelfDestruct = () => { network.sendSelfDestruct(); };
 input.onToggleKeysGuide = () => { hud.toggleKeysGuide(); };

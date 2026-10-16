@@ -29,6 +29,11 @@ export class InputManager {
 
   // Callbacks fired immediately on keydown (bypass rate limiter)
   onLaunch: (() => void) | null = null;
+  /**
+   * Fired on a left mouse press, and only while the mouse is already captured —
+   * the click that wins the capture back must never double as a shot.
+   */
+  onFireMouse: (() => void) | null = null;
   onSelfDestruct: (() => void) | null = null;
   onToggleKeysGuide: (() => void) | null = null;
   /** Pick a weapon outright (1 = quad, 2 = mortar). */
@@ -95,7 +100,12 @@ export class InputManager {
     });
 
     document.addEventListener('mousedown', (e) => {
-      if (e.button === 0) this.mouseDown = true;
+      if (e.button !== 0) return;
+      this.mouseDown = true;
+      // Left click is the mortar's trigger as well as the drone's boost. It only
+      // counts once the mouse is captured, so the click that re-captures it (or a
+      // click on the menu before the game starts) cannot send a shell by accident.
+      if (this.pointerLocked && this.onFireMouse) this.onFireMouse();
     });
 
     document.addEventListener('mouseup', (e) => {

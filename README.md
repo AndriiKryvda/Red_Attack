@@ -76,7 +76,8 @@ Open **http://localhost:5173** in your browser.
 
 Two stations, one key each: `1` mans the FPV drone pad, `2` mans the tube mortar and
 `Tab` swaps between them. `Space` then does whatever the manned station does — launch
-the quad, or send a shell at wherever the fort view is pointing.
+the quad, or send a shell at wherever the fort view is pointing. With the tube manned,
+the left mouse button is a second trigger for the same shell.
 
 ### Keys
 
@@ -91,7 +92,7 @@ the quad, or send a shell at wherever the fort view is pointing.
 | **↑ / ↓** or **Q / E** | Pitch (tilt nose up / down) — keyboard equivalent of mouse Y |
 | **Space** | Ascend (throttle up); when waiting at the fort: launch the drone or fire the mortar |
 | **Shift** | Descend (throttle down) |
-| **LMB** | Boost (2× speed) |
+| **LMB** | Boost (2× speed); with the tube manned, fires the mortar |
 | **R** | Self-destruct drone |
 | **H** | Show / hide the on-screen key guide (remembered between sessions) |
 | **Click** | Recapture the mouse after alt-tabbing away or pressing `Esc` |
@@ -123,8 +124,9 @@ a 30 m/s pass would have flown past.
    far ring. An amber marker means the spot you wanted sits outside the ring of fire
    and the shot will be pulled back onto the limit — the fort and its own wire always
    fall short of the minimum range, so nothing lands inside the perimeter.
-3. **Fire** — `Space`. The camera leaves the fort, tracks the shell from the side for
-   the whole flight and holds a second on the crater before the view goes back.
+3. **Fire** — `Space` or the left mouse button. The camera leaves the fort, tracks the
+   shell from the side for the whole flight and holds a second on the crater before the
+   view goes back.
 4. **Reload** — 8 s, on each pilot's own clock.
 
 Flight time tells you the range: about 1.9 s at the near limit, 3.8 s at the far one,
@@ -216,13 +218,13 @@ clear, so a quad always has a way out.
 
 | Piece | What it is |
 |-------|-----------|
-| Berm and wire | An earth berm on all four sides, sandbag revetment along the crest and a fence on top. Reaching this line is what counts as a breach (`FORT_PERIMETER`, 12.5 m from the centre) |
+| Berm and wire | Sandbags on all four sides — three bags thick, six courses high — with a fence on top. Reaching this line is what counts as a breach (`FORT_PERIMETER`, 12.5 m from the centre) |
 | Firing platforms | Sandbagged decks on posts at all four corners — the lookouts of the position |
-| Command bunker | North-west: a roofless concrete bunker, a revetted pit to shelter in rather than a roof a drone can fly into |
+| Command bunker | North-west: a roofless bunker of sandbag walls on a poured floor, a revetted pit to shelter in rather than a roof a drone can fly into |
 | Drone pad | South-west: the FPV quad on a marked concrete slab with its guidance mast |
 | Mortar pad | South-east: the tube on a poured slab, firing clear over the berm |
 | Gate | South face: the vehicle gap in the berm, sandbagged at the flanks |
-| Flag | An 11 m pole flying the Ukrainian blue-and-yellow over the courtyard |
+| Flag | An 11 m pole on a sandbag plinth in the middle of the courtyard, flying the Ukrainian blue-and-yellow |
 
 ### The Village
 

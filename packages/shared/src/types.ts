@@ -1,4 +1,5 @@
 import { StructureKind, StructureVariant } from './structures.js';
+import { WeaponType } from './mortar.js';
 
 
 // ─── Enemy Types ───────────────────────────────────────────
@@ -95,6 +96,10 @@ export interface PlayerData {
   ready: boolean;
   droneId: string | null;
   cooldownUntil: number; // timestamp
+  /** Which of the fort's weapons this pilot is currently manning. */
+  weapon: WeaponType;
+  /** Timestamp the mortar crew needs before it can fire again. */
+  mortarReadyAt: number;
 }
 
 // ─── Horde ───────────────────────────────────────────
@@ -146,18 +151,53 @@ export interface PlayerNameMsg {
   name: string;
 }
 
+/** Swap the pilot over to the other weapon of the fort. */
+export interface SelectWeaponMsg {
+  type: 'select_weapon';
+  weapon: WeaponType;
+}
+
+/** Drop a shell on a spot of the field; the server clamps it into range. */
+export interface MortarFireMsg {
+  type: 'mortar_fire';
+  x: number;
+  z: number;
+}
+
 export type ClientMessage =
   | LaunchDroneMsg
   | DroneInputMsg
   | SelfDestructMsg
   | PlayerReadyMsg
-  | PlayerNameMsg;
+  | PlayerNameMsg
+  | SelectWeaponMsg
+  | MortarFireMsg;
 
 // ─── Server → Client Events ───────────────────────────────
 export interface ExplosionEvent {
   type: 'explosion';
   position: Vec3;
   radius: number;
+  /** Visual size multiplier: a mortar shell is a bigger affair than a quad. */
+  scale?: number;
+}
+
+/**
+ * A shell left the fort's mortar. The launch vector and flight time are sent
+ * instead of live positions: the arc is closed-form, so every client redraws the
+ * exact parabola the server resolves the hit on without any further traffic.
+ */
+export interface MortarFireEvent {
+  type: 'mortar_fire';
+  shellId: string;
+  ownerId: string;
+  /** Muzzle the shell left, in world space. */
+  origin: Vec3;
+  /** Launch velocity (m/s). */
+  velocity: Vec3;
+  /** Seconds from the muzzle down to `impact`. */
+  flight: number;
+  impact: Vec3;
 }
 
 export interface EnemyKilledEvent {
@@ -235,6 +275,7 @@ export interface GameOverEvent {
 
 export type ServerEvent =
   | ExplosionEvent
+  | MortarFireEvent
   | EnemyKilledEvent
   | EnemyHitEvent
   | StructureHitEvent

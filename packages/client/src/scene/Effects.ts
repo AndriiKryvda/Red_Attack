@@ -50,10 +50,11 @@ export class EffectsManager {
     this.scene = scene;
   }
 
-  spawnExplosion(x: number, y: number, z: number) {
+  /** `scale` grows the whole burst: a mortar shell is a bigger affair than a quad. */
+  spawnExplosion(x: number, y: number, z: number, scale = 1) {
     const count = 30;
     for (let i = 0; i < count; i++) {
-      const size = 0.2 + Math.random() * 0.4;
+      const size = (0.2 + Math.random() * 0.4) * scale;
       const geo = new THREE.BoxGeometry(size, size, size);
       const color = Math.random() > 0.5 ? 0xff4400 : (Math.random() > 0.5 ? 0xffaa00 : 0xff0000);
       const mat = new THREE.MeshBasicMaterial({ color, transparent: true });
@@ -62,9 +63,9 @@ export class EffectsManager {
       this.scene.add(mesh);
 
       const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 12,
-        Math.random() * 8,
-        (Math.random() - 0.5) * 12
+        (Math.random() - 0.5) * 12 * scale,
+        Math.random() * 8 * scale,
+        (Math.random() - 0.5) * 12 * scale
       );
 
       this.particles.push({
@@ -74,7 +75,7 @@ export class EffectsManager {
     }
 
     // Flash sphere
-    const flashGeo = new THREE.SphereGeometry(2, 8, 8);
+    const flashGeo = new THREE.SphereGeometry(2 * scale, 8, 8);
     const flashMat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 });
     const flash = new THREE.Mesh(flashGeo, flashMat);
     flash.position.set(x, y, z);

@@ -1,12 +1,17 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { GameState, EnemyType, PlayerState, ServerEvent } from '@red-attack/shared';
+import {
+  GameState, EnemyType, PlayerState, ServerEvent, WeaponType,
+  clampMortarTarget, MORTAR_POSITION, MORTAR_MUZZLE_HEIGHT,
+} from '@red-attack/shared';
 import { createTerrain } from './Terrain';
 import { createOutpost } from './Outpost';
 import { EnemyRenderer } from './Enemy';
 import { DroneRenderer } from './Drone';
 import { EffectsManager } from './Effects';
 import { StructureRenderer } from './Structures';
+import { MortarView } from './Mortar';
+import { MortarFx } from './MortarFx';
 
 export class GameScene {
   private renderer: THREE.WebGLRenderer;
@@ -16,6 +21,10 @@ export class GameScene {
   private droneRenderer: DroneRenderer;
   private effects: EffectsManager;
   private structureRenderer: StructureRenderer;
+  private mortar: MortarView;
+  private mortarFx: MortarFx;
+  /** Where the tube is currently laid, already clamped inside the ring of fire. */
+  private mortarAim = clampMortarTarget(0, 0);
   private clock: THREE.Clock;
   private localPlayerId: string = '';
 
@@ -90,6 +99,13 @@ export class GameScene {
     this.effects = new EffectsManager(this.scene);
     this.structureRenderer = new StructureRenderer(this.scene);
 
+    // The fort's mortar: a live model on its slab plus the aiming and flight layer.
+    this.mortar = new MortarView(this.scene);
+    this.mortarFx = new MortarFx(
+      this.scene,
+      (x, y, z, color) => this.effects.spawnTrailPuff(x, y, z, color),
+    );
+
     this.clock = new THREE.Clock();
 
     window.addEventListener('resize', () => this.onResize());
@@ -131,7 +147,15 @@ export class GameScene {
     // Process events (explosions etc)
     for (const ev of events) {
       if (ev.type === 'explosion') {
-        this.effects.spawnExplosion(ev.position.x, ev.position.y, ev.position.z);
+        this.effects.spawnExplosion(ev.position.x, ev.position.y, ev.position.z, ev.scale ?? 1);
+      } else if (ev.type === 'mortar_fire') {
+        // A shell left the tube: kick the model, throw a blast at the muzzle and
+        // hand the shell to the flight layer, which also drives the camera.
+        this.mortar.kick();
+        this.effects.spawnExplosion(
+          MORTAR_POSITION.x, MORTAR_MUZZLE_HEIGHT + 0.4, MORTAR_POSITION.z, 0.3,
+        );
+        this.mortarFx.spawnShell(ev);
       } else if (ev.type === 'enemy_killed') {
         // A destroyed vehicle leaves a burning wreck on the field. Foot troops
         // have no hull to burn, so the call simply ignores them.
@@ -166,7 +190,26 @@ export class GameScene {
       this.hadDrone = false;
     }
 
-    // Camera logic
+    // ─── Mortar station ────────────────────────────────────
+    // The tube is manned whenever the pilot has it selected and is standing in the
+    // fort: while a quad is in the air the pilot is flying it, not laying the tube.
+    const manningMortar = (me?.weapon ?? WeaponType.FPV) === WeaponType.MORTAR && !piloting;
+    if (manningMortar) {
+      const requested = this.groundAim(playerYaw, playerPitch);
+      this.mortarAim = clampMortarTarget(requested.x, requested.z);
+      this.mortar.aim(Math.atan2(
+        this.mortarAim.x - MORTAR_POSITION.x,
+        this.mortarAim.z - MORTAR_POSITION.z,
+      ));
+      this.mortarFx.setPreview(requested.x, requested.z);
+    }
+    this.mortarFx.setVisible(manningMortar);
+    this.mortar.update(_dt);
+    this.mortarFx.update(_dt, this.localPlayerId);
+
+    // Camera logic. Watching our own shell come down outranks the crash-cam: it is
+    // the thing the pilot just did and is the reason the view left the fort.
+    const mortarCam = this.mortarFx.cameraShot(this.localPlayerId);
     if (piloting && myDrone) {
       // FPV drone camera
       this.camera.position.set(myDrone.position.x, myDrone.position.y, myDrone.position.z);
@@ -176,6 +219,10 @@ export class GameScene {
       const lookY = myDrone.position.y + Math.sin(pitch) * 10;
       const lookZ = myDrone.position.z + Math.cos(yaw) * Math.cos(pitch) * 10;
       this.camera.lookAt(lookX, lookY, lookZ);
+    } else if (mortarCam) {
+      // Side-on tracking of the shell, then a beat held on the crater it makes.
+      this.camera.position.copy(mortarCam.pos);
+      this.camera.lookAt(mortarCam.look);
     } else if (elapsed < this.deathCamUntil) {
       // Crash-cam: linger on the explosion for a few seconds, then switch back.
       this.camera.position.set(
@@ -199,6 +246,27 @@ export class GameScene {
 
     // Update effects
     this.effects.update(_dt);
+  }
+
+  /**
+   * Where the fort view is pointing, dropped onto the ground: the crosshair in the
+   * middle of the screen as an aim point on the field. Looking at or above the
+   * horizon gives no ground to hit, so the ray runs out to a long stand-in distance
+   * and the clamp pulls it back onto the far edge of the ring of fire.
+   */
+  private groundAim(yaw: number, pitch: number): { x: number; z: number } {
+    const horiz = Math.cos(pitch);
+    const dy = Math.sin(pitch);
+    const t = dy < -0.02 ? this.FORT_POS.y / -dy : 150;
+    return {
+      x: this.FORT_POS.x + Math.sin(yaw) * horiz * t,
+      z: this.FORT_POS.z + Math.cos(yaw) * horiz * t,
+    };
+  }
+
+  /** The spot the crew is laid on right now, already inside the ring of fire. */
+  getMortarAim(): { x: number; z: number } {
+    return { x: this.mortarAim.x, z: this.mortarAim.z };
   }
 
   render() {

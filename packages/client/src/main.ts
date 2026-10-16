@@ -2,7 +2,7 @@ import { GameScene } from './scene/Scene';
 import { NetworkClient } from './network/Client';
 import { InputManager } from './input/InputManager';
 import { HUD } from './ui/HUD';
-import { ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS } from '@red-attack/shared';
+import { ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS, WeaponType } from '@red-attack/shared';
 
 // ─── Bootstrap ─────────────────────────────────────────────
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -24,10 +24,31 @@ const network = new NetworkClient();
 
 let gameStarted = false;
 
+// The pilot's own row of the latest state, if it has arrived yet.
+function localPlayer() {
+  const state = network.getState();
+  return state?.players.find(p => p.id === network.sessionId);
+}
+
 // Wire immediate-action callbacks (bypass rate limiter)
-input.onLaunch = () => { network.sendLaunch(); };
+// Space is the fire button for whichever weapon the pilot is manning: it launches
+// the quad, or it sends a shell from the mortar at wherever the fort view is
+// pointing. The server clamps the shot into the ring of fire either way.
+input.onLaunch = () => {
+  if (localPlayer()?.weapon === WeaponType.MORTAR) {
+    const aim = scene.getMortarAim();
+    network.sendMortarFire(aim.x, aim.z);
+  } else {
+    network.sendLaunch();
+  }
+};
 input.onSelfDestruct = () => { network.sendSelfDestruct(); };
 input.onToggleKeysGuide = () => { hud.toggleKeysGuide(); };
+input.onSelectWeapon = (weapon) => { network.sendSelectWeapon(weapon); };
+input.onCycleWeapon = () => {
+  const next = localPlayer()?.weapon === WeaponType.MORTAR ? WeaponType.FPV : WeaponType.MORTAR;
+  network.sendSelectWeapon(next);
+};
 
 // The browser drops the mouse capture whenever the window loses focus; the
 // InputManager wins it back on return, and asks for this hint when it needs a

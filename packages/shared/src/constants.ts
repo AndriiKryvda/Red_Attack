@@ -83,6 +83,9 @@ export const ENEMY_DEATH_LINGER_TIME = 30; // seconds before dead enemies disapp
 // ─── Outpost ───────────────────────────────────────────────
 // The fort has no hit points: every enemy that reaches it is simply counted as a
 // breach (see GameRoom.leaks) and the horde keeps coming.
+// The courtyard is fenced in: an enemy that walks up to the wire has broken
+// through, it does not get to stroll across the parade ground.
+export const FORT_PERIMETER = 12.5;        // meters from center (the fence line)
 
 // ─── Horde (endless escalating assault) ──────────────────
 // There are no discrete waves: enemies stream toward the fort continuously and
@@ -109,6 +112,32 @@ export const OUTPOST_RADIUS = 15;        // meters (outpost footprint)
 export const HORDE_SPAWN_BORDER = MAP_SIZE / 2 - 2;  // meters from center (the edge itself)
 export const HORDE_SPAWN_RING_MIN = 142;   // meters from center (nearest spawn arc)
 export const HORDE_SPAWN_RING_MAX = 149;   // meters from center (farthest spawn arc)
+
+// ─── Mortar ────────────────────────────────────────────────
+// The tube mortar on the courtyard pad owns the middle of the field. Both limits
+// are a share of the half-map: at 20% a shell cannot land on our own fence, and
+// at 80% the border the horde walks in from stays the drone's job.
+export const MORTAR_RANGE_MIN_PCT = 0.20;
+export const MORTAR_RANGE_MAX_PCT = 0.80;
+export const MORTAR_MIN_RANGE = (MAP_SIZE / 2) * MORTAR_RANGE_MIN_PCT; // 30 m
+export const MORTAR_MAX_RANGE = (MAP_SIZE / 2) * MORTAR_RANGE_MAX_PCT; // 120 m
+/** Standing lay: the barrel is never raised below this, so every shot is a lob. */
+export const MORTAR_ELEVATION = (60 * Math.PI) / 180;
+/** Heavier than real gravity on purpose: keeps the arc short enough to read. */
+export const MORTAR_GRAVITY = 30;
+/** Where the fort's mortar stands, and how high its muzzle sits. */
+export const MORTAR_POSITION = { x: 7, z: 5 };
+export const MORTAR_MUZZLE_HEIGHT = 1.9;
+/** Seconds the crew needs to lay the tube again between two shots. */
+export const MORTAR_RELOAD_TIME = 8;
+/** Blast radius: everything inside it is gone, buildings take one hit each. */
+export const MORTAR_KILL_RADIUS = 9;
+/** Damage one shell deals (a bear has 5 hp, a tank 2), so one shell clears all. */
+export const MORTAR_DAMAGE = 6;
+/** Visual size of the blast relative to a drone detonation. */
+export const MORTAR_BLAST_SCALE = 1.9;
+/** Seconds the impact camera lingers on the crater after the shell lands. */
+export const MORTAR_CAM_HOLD = 1;
 
 // ─── Server ────────────────────────────────────────────────
 export const TICK_RATE = 50;             // ms per tick (20 TPS)

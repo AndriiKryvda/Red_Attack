@@ -1,5 +1,5 @@
 import { Client, Room } from '@colyseus/sdk';
-import { GameState, ServerEvent } from '@red-attack/shared';
+import { GameState, ServerEvent, WeaponType } from '@red-attack/shared';
 
 export class NetworkClient {
   private client: Client;
@@ -64,6 +64,16 @@ export class NetworkClient {
   /** Send immediately — no rate limit */
   sendSelfDestruct() {
     if (this.room) this.room.send('self_destruct', { type: 'self_destruct' });
+  }
+
+  /** Swap the pilot between the quad and the tube - immediate, no rate limit. */
+  sendSelectWeapon(weapon: WeaponType) {
+    if (this.room) this.room.send('select_weapon', { type: 'select_weapon', weapon });
+  }
+
+  /** Drop a shell on a spot of the field; the server clamps it into the ring of fire. */
+  sendMortarFire(x: number, z: number) {
+    if (this.room) this.room.send('mortar_fire', { type: 'mortar_fire', x, z });
   }
 
   /** Rate-limited continuous drone input */

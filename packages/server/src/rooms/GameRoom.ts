@@ -17,6 +17,10 @@ import {
   StructureKind, SpawnEdge, STRUCTURE_SPECS, BUILDING_VARIANTS, CAR_VARIANTS,
   VILLAGE_EDGE_OFFSET, VILLAGE_SPREAD, VILLAGE_CAR_DEPTH, HORDE_BUILDING_SPAWN_CHANCE,
   HORDE_DOOR_SPREAD, HORDE_DOOR_GAP, SPAWN_EDGE_ANGLE, SPAWN_EDGE_ARC, pickSpawnEdge,
+  FORT_PERIMETER,
+  WeaponType, clampMortarTarget, mortarBallistics, mortarShellHeight, MortarShot,
+  MORTAR_POSITION, MORTAR_MUZZLE_HEIGHT, MORTAR_RELOAD_TIME, MORTAR_KILL_RADIUS,
+  MORTAR_DAMAGE, MORTAR_BLAST_SCALE,
 } from '@red-attack/shared';
 import { roomCodeRegistry } from '../index.js';
 
@@ -46,6 +50,22 @@ interface InternalPlayer extends PlayerData {
   lastInput: number;
 }
 
+/** One mortar shell in the air, resolved in closed form on every tick. */
+interface InternalShell {
+  id: string;
+  ownerId: string;
+  /** Muzzle the shell left from, in world space. */
+  origin: Vec3;
+  /** Launch velocity (m/s): position falls straight out of it. */
+  velocity: Vec3;
+  /** Timestamp the shell left the muzzle. */
+  firedAt: number;
+  /** Seconds of flight, from mortarBallistics. */
+  flight: number;
+  /** Where it is committed to landing. */
+  impact: Vec3;
+}
+
 /**
  * Share of the kill score paid to a pilot whose drone damaged an armoured target
  * without destroying it (the tank after the first hit).
@@ -67,10 +87,13 @@ export class GameRoom extends Room {
   /** The village on the north and east edges, and the doorways the horde uses. */
   structures: Map<string, InternalStructure> = new Map();
   doors: Map<SpawnEdge, InternalStructure[]> = new Map();
+  /** Shells currently in the air from the fort's mortar. */
+  shells: Map<string, InternalShell> = new Map();
 
   private spawnAccumulator: number = 0;
   private idCounter: number = 0;
   private structureIdCounter: number = 0;
+  private shellIdCounter: number = 0;
   /** Enemy types whose kill threshold has been reached (and announced). */
   private unlockedEnemies: Set<EnemyType> = new Set();
 
@@ -105,6 +128,8 @@ export class GameRoom extends Room {
       ready: false,
       droneId: null,
       cooldownUntil: 0,
+      weapon: WeaponType.FPV,
+      mortarReadyAt: 0,
       lastInput: Date.now(),
     };
     this.players.set(id, player);
@@ -120,6 +145,11 @@ export class GameRoom extends Room {
     const player = this.players.get(id);
     if (player?.droneId) {
       this.drones.delete(player.droneId);
+    }
+    // A shell already in the air still lands and still kills; it just stops
+    // belonging to anyone, so nobody inherits the score.
+    for (const [sid, shell] of this.shells) {
+      if (shell.ownerId === id) this.shells.delete(sid);
     }
     this.players.delete(id);
   }
@@ -138,6 +168,7 @@ export class GameRoom extends Room {
     this.leaks = 0;
     this.kills = 0;
     this.unlockedEnemies.clear();
+    this.shells.clear();
     this.buildVillage();
     this.broadcastEvent({ type: 'horde_start' });
     console.log(`[Horde] Room ${this.roomCode}: endless horde engaged`);
@@ -215,6 +246,7 @@ export class GameRoom extends Room {
       this.tickSpawner();
       this.tickEnemies();
       this.tickDrones();
+      this.tickShells();
       this.tickCooldowns();
     }
     this.broadcastState();
@@ -433,7 +465,7 @@ export class GameRoom extends Room {
       const dz = enemy.targetPos.z - enemy.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
 
-      if (dist < 5) {
+      if (dist < FORT_PERIMETER) {
         // Reached the fort: it counts as a breach and is consumed at the wall.
         // There is no defeat condition — the horde presses on forever.
         this.leaks++;
@@ -452,6 +484,82 @@ export class GameRoom extends Room {
       // as an invisible slope right in front of the walls.
       enemy.position.y = 0;
     }
+  }
+
+  // ─── Mortar ──────────────────────────────────────────────
+  /**
+   * Send a shell at a spot of the field. The aim point is clamped into the ring of
+   * fire first, so a click out past the border still lands at the limit of the tube
+   * instead of nowhere, and nothing ever falls short onto our own fence line.
+   */
+  private fireMortar(player: InternalPlayer, x: number, z: number) {
+    const target = clampMortarTarget(x, z);
+    const origin: Vec3 = { x: MORTAR_POSITION.x, y: MORTAR_MUZZLE_HEIGHT, z: MORTAR_POSITION.z };
+    const shot: MortarShot = mortarBallistics(origin.x, origin.y, origin.z, target.x, target.z);
+    const shell: InternalShell = {
+      id: `m_${this.shellIdCounter++}`,
+      ownerId: player.id,
+      origin,
+      velocity: { x: shot.vx, y: shot.vy, z: shot.vz },
+      firedAt: this.serverTime,
+      flight: shot.flight,
+      impact: { x: shot.impactX, y: 0, z: shot.impactZ },
+    };
+    this.shells.set(shell.id, shell);
+    player.mortarReadyAt = this.serverTime + MORTAR_RELOAD_TIME * 1000;
+    this.broadcastEvent({
+      type: 'mortar_fire', shellId: shell.id, ownerId: player.id,
+      origin: { ...origin }, velocity: { ...shell.velocity },
+      flight: shell.flight, impact: { ...shell.impact },
+    });
+  }
+
+  /**
+   * Walk every shell along its parabola. Nothing is networked per frame: the
+   * position falls straight out of the launch vector, so the server only has to
+   * notice the moment a shell comes back down onto the ground.
+   */
+  private tickShells() {
+    for (const shell of this.shells.values()) {
+      const t = (this.serverTime - shell.firedAt) / 1000;
+      if (t >= shell.flight || mortarShellHeight(shell.origin.y, shell.velocity.y, t) <= 0) {
+        this.detonateShell(shell);
+      }
+    }
+  }
+
+  /**
+   * A shell lands. Everything inside the blast is finished in one hit — bears and
+   * tanks alike, which is what the tube is for — and each building caught by it
+   * takes the same single heavy hit a drone would, so a shell onto a roof leaves it
+   * burning. The pilot is credited through the usual damage paths.
+   */
+  private detonateShell(shell: InternalShell) {
+    this.shells.delete(shell.id);
+    const radiusSq = MORTAR_KILL_RADIUS * MORTAR_KILL_RADIUS;
+    let kills = 0;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.dead) continue;
+      const dx = shell.impact.x - enemy.position.x;
+      const dz = shell.impact.z - enemy.position.z;
+      if (dx * dx + dz * dz > radiusSq) continue;
+      if (this.damageEnemy(enemy, shell.ownerId, MORTAR_DAMAGE)) kills++;
+    }
+    for (const st of this.structures.values()) {
+      if (st.destroyed) continue;
+      const dx = shell.impact.x - st.x;
+      const dz = shell.impact.z - st.z;
+      if (dx * dx + dz * dz > radiusSq) continue;
+      this.damageStructure(st, shell.ownerId);
+    }
+    if (kills >= MULTI_KILL_THRESHOLD) {
+      const player = this.players.get(shell.ownerId);
+      if (player) player.score += MULTI_KILL_BONUS;
+    }
+    this.broadcastEvent({
+      type: 'explosion', position: { ...shell.impact },
+      radius: MORTAR_KILL_RADIUS, scale: MORTAR_BLAST_SCALE,
+    });
   }
 
   // ─── Drone Physics ───────────────────────────────────────
@@ -528,14 +636,15 @@ export class GameRoom extends Room {
   }
 
   /**
-   * Applies one drone detonation to an enemy and returns true if it died.
-   * Armoured units (the tank) soak a hit, catch fire and keep driving, so they
-   * need a second quad to finish them off.
+   * Applies one detonation to an enemy and returns true if it died. One unit of
+   * damage is a quad's payload; the mortar arrives with a heavier one and clears
+   * the whole armour table in a single shell. Armoured units (the tank) soak a
+   * hit, catch fire and keep driving, so they need a second quad to finish them.
    */
-  private damageEnemy(enemy: InternalEnemy, killerId: string): boolean {
+  private damageEnemy(enemy: InternalEnemy, killerId: string, damage = 1): boolean {
     const stats = ENEMY_STATS[enemy.type];
     const player = this.players.get(killerId);
-    enemy.hp = Math.max(0, enemy.hp - stats.armour);
+    enemy.hp = Math.max(0, enemy.hp - damage * stats.armour);
 
     if (enemy.hp > 0) {
       enemy.burning = true;
@@ -587,8 +696,30 @@ export class GameRoom extends Room {
       case 'player_name':
         player.name = msg.name;
         break;
+      case 'select_weapon':
+        // Swapping stations is free and always allowed. A pilot mid-flight keeps
+        // flying the quad they already have; the choice only gates what the next
+        // launch does.
+        if (msg.weapon === WeaponType.FPV || msg.weapon === WeaponType.MORTAR) {
+          player.weapon = msg.weapon;
+        }
+        break;
+      case 'mortar_fire':
+        if (
+          player.weapon === WeaponType.MORTAR
+          && this.phase === GamePhase.PLAYING
+          && this.serverTime >= player.mortarReadyAt
+        ) {
+          this.fireMortar(player, msg.x, msg.z);
+        }
+        break;
       case 'launch_drone':
-        if (player.state === PlayerState.WAITING && this.phase === GamePhase.PLAYING) {
+        // Only the drone station launches: with the tube manned, SPACE is a shell.
+        if (
+          player.weapon === WeaponType.FPV
+          && player.state === PlayerState.WAITING
+          && this.phase === GamePhase.PLAYING
+        ) {
           this.launchDrone(player);
         }
         break;
@@ -687,6 +818,7 @@ export class GameRoom extends Room {
         id: p.id, name: p.name, state: p.state,
         score: p.score, ready: p.ready,
         droneId: p.droneId, cooldownUntil: p.cooldownUntil,
+        weapon: p.weapon, mortarReadyAt: p.mortarReadyAt,
       })),
       serverTime: this.serverTime,
     };

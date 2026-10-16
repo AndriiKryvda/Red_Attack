@@ -32,6 +32,15 @@
     #hud .compass-ptr { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #ffd700; }
     #hud .flight { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 8px 12px; color: #9fe8ff; font-size: 13px; line-height: 1.5; display: none; min-width: 130px; }
     #hud .flight b { color: #fff; }
+    #hud .weapon-panel { position: absolute; top: 92px; right: 20px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 8px 10px; color: #cfe8ff; font-size: 12px; min-width: 216px; }
+    #hud .wp-title { color: #fff; font-weight: bold; letter-spacing: 2px; margin-bottom: 6px; }
+    #hud .wp-title small { color: #8a8a8a; font-weight: normal; letter-spacing: 1px; margin-left: 8px; }
+    #hud .wp-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-left: 3px solid transparent; opacity: 0.5; }
+    #hud .wp-row.on { opacity: 1; border-left-color: #ffd700; background: rgba(255,215,0,0.12); }
+    #hud .wp-row .wp-key { width: 16px; text-align: center; border: 1px solid rgba(255,255,255,0.45); border-radius: 3px; font-size: 11px; }
+    #hud .wp-row .wp-name { flex: 1; letter-spacing: 1px; }
+    #hud .wp-row .wp-state { color: #9fe8ff; font-size: 11px; }
+    #hud .wp-row.cool .wp-state { color: #ffb04a; }
     #hud .keys-guide { position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; padding: 8px 12px; color: #cfe8ff; font-size: 12px; line-height: 1.55; min-width: 236px; }
     #hud .keys-guide.hidden { display: none; }
     #hud .keys-guide .kg-title { display: flex; justify-content: space-between; gap: 14px; color: #fff; font-size: 11px; font-weight: bold; letter-spacing: 2px; border-bottom: 1px solid rgba(255,255,255,0.25); padding-bottom: 4px; margin-bottom: 6px; }
@@ -70,6 +79,11 @@
     <div class="wave-info" id="wave-info">Horde incoming…</div>
     <div class="drone-status" id="drone-status">Press SPACE to launch</div>
     <div class="score" id="score-display">Score: 0</div>
+    <div class="weapon-panel" id="weapon-panel">
+      <div class="wp-title">WEAPON<small>1 / 2 / Tab</small></div>
+      <div class="wp-row" id="wp-fpv"><span class="wp-key">1</span><span class="wp-name">FPV DRONE</span><span class="wp-state" id="wp-fpv-state">READY</span></div>
+      <div class="wp-row" id="wp-mortar"><span class="wp-key">2</span><span class="wp-name">MORTAR</span><span class="wp-state" id="wp-mortar-state">READY</span></div>
+    </div>
     <div class="room-code" id="room-code-display"></div>
     <div class="announcement" id="announcement"></div>
     <div class="crosshair" id="crosshair"></div>
@@ -86,8 +100,9 @@
       <div>TIME <b id="fl-time">0</b> s</div>
     </div>
     <div class="keys-guide" id="keys-guide">
-      <div class="kg-title">FPV CONTROLS<small>press H to hide</small></div>
-      <div class="kg-row" id="kg-launch"><span class="kg-keys"><kbd>Space</kbd></span><span>Launch / ascend</span></div>
+      <div class="kg-title">FORT CONTROLS<small>press H to hide</small></div>
+      <div class="kg-row" id="kg-launch"><span class="kg-keys"><kbd>Space</kbd></span><span>Fire: launch drone / fire mortar</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>1</kbd><kbd>2</kbd><kbd>Tab</kbd></span><span>Weapon: drone / mortar / swap</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>W</kbd><kbd>S</kbd></span><span>Thrust fwd / back</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>A</kbd><kbd>D</kbd></span><span>Yaw left / right</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>Mouse</kbd></span><span>Look (yaw + pitch)</span></div>
@@ -116,6 +131,9 @@
       <button id="btn-join" style="margin-left:10px;background:#4caf50">JOIN GAME</button>
       <div id="error-msg" style="color:#ff6b6b;font-size:14px;margin-top:12px;min-height:20px"></div>
       <div class="controls">
+        <strong>Weapons:</strong><br/>
+        1 — FPV drone | 2 — Mortar | Tab — swap · Space fires whichever is selected<br/>
+        The mortar covers 30-120 m from the fort: aim with the view, watch the shell land.<br/><br/>
         <strong>Drone Controls (FPV):</strong><br/>
         W/S — Forward/Back | A/D — Yaw (rotate) | Mouse — Yaw + Pitch<br/>
         &uarr;/&darr; or Q/E — Pitch (tilt nose up/down)<br/>

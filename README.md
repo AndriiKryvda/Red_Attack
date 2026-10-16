@@ -1,6 +1,6 @@
 # 🔴 Red Attack
 
-A browser-based multiplayer FPV drone defense game. Players defend an outpost from an endless horde of enemies by launching and piloting kamikaze drones in first-person view. The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
+A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an endless horde. Two weapons are on the table: fly a kamikaze drone in first-person view for precision work, or stand at the tube mortar and put shells across the middle of the field. The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
 
 ## Tech Stack
 
@@ -24,18 +24,21 @@ red-attack/
 │   │       ├── scene/       # Three.js scene, drone, enemies, terrain
 │   │       │                #   Outpost.ts / VillageModels.ts — the fort and the
 │   │       │                #   destructible village (models, flags, ruins)
+│   │       │                #   Mortar.ts / MortarFx.ts — the tube, its aim
+│   │       │                #   rings and the shell / shell-camera layer
 │   │       │                #   Structures.ts — client side of the village state
 │   │       │                #   VehicleModels.ts — horde vehicles
 │   │       ├── ui/          # HUD overlay
 │   │       └── main.ts      # Game loop
 │   ├── server/          # Colyseus game server
 │   │   └── src/
-│   │       ├── rooms/       # GameRoom (state, physics, horde, village)
+│   │       ├── rooms/       # GameRoom (state, physics, horde, village, shells)
 │   │       └── index.ts     # HTTP + WebSocket entry
 │   └── shared/          # Shared types & game constants
 │       └── src/
 │           ├── types.ts
 │           ├── constants.ts
+│           ├── mortar.ts      # weapon types, range clamp, shared ballistics
 │           └── structures.ts  # STRUCTURE_SPECS, village layout, spawn edges
 ├── docs/                # Design documents
 └── package.json         # Workspace root
@@ -69,16 +72,24 @@ cd packages/client && npx vite
 
 Open **http://localhost:5173** in your browser.
 
-## Controls (FPV Drone)
+## Controls
+
+Two stations, one key each: `1` mans the FPV drone pad, `2` mans the tube mortar and
+`Tab` swaps between them. `Space` then does whatever the manned station does — launch
+the quad, or send a shell at wherever the fort view is pointing.
+
+### Keys
 
 | Key | Action |
 |-----|--------|
+| **1 / 2** | Man the FPV drone pad / man the tube mortar |
+| **Tab** | Swap between the two weapons |
 | **W / S** | Forward / backward thrust (in drone's facing direction) |
 | **A / D** | Yaw rotation (rotate drone left / right) |
 | **Mouse X** | Yaw rotation (additive with A/D) |
 | **Mouse Y** | Pitch (tilt nose up / down) |
 | **↑ / ↓** or **Q / E** | Pitch (tilt nose up / down) — keyboard equivalent of mouse Y |
-| **Space** | Ascend (throttle up) / Launch drone when waiting |
+| **Space** | Ascend (throttle up); when waiting at the fort: launch the drone or fire the mortar |
 | **Shift** | Descend (throttle down) |
 | **LMB** | Boost (2× speed) |
 | **R** | Self-destruct drone |
@@ -87,7 +98,7 @@ Open **http://localhost:5173** in your browser.
 
 ### How to Fly
 
-1. **Launch** — Press `Space` while waiting at the outpost.
+1. **Launch** — With the drone manned (`1`), press `Space` to send the quad off the pad.
 2. **Turn** — Use `A`/`D` or move the mouse left/right to yaw the drone.
 3. **Altitude** — `Space` to ascend, `Shift` to descend.
 4. **Tilt** — hold `↑`/`↓` (or `Q`/`E`) to point the nose up or down without moving the mouse.
@@ -99,6 +110,30 @@ Open **http://localhost:5173** in your browser.
    you pressed `Esc` instead, click once to resume mouse look. Keys held when
    you left are released so the drone does not fly off on its own.
 
+### The Mortar
+
+The tube on the courtyard slab is the fort's area weapon. It cannot be aimed as
+precisely as a quad, but one shell clears a whole crowd at once and it reaches ground
+a 30 m/s pass would have flown past.
+
+1. **Man it** — press `2` (or `Tab`). The fort view gains two painted range rings and
+   a dashed arc that swings with the mouse.
+2. **Aim** — the tube is laid at a fixed 60° elevation, so the only thing a pilot sets
+   is *distance*: swinging the view slides the impact marker between the near and the
+   far ring. An amber marker means the spot you wanted sits outside the ring of fire
+   and the shot will be pulled back onto the limit — the fort and its own wire always
+   fall short of the minimum range, so nothing lands inside the perimeter.
+3. **Fire** — `Space`. The camera leaves the fort, tracks the shell from the side for
+   the whole flight and holds a second on the crater before the view goes back.
+4. **Reload** — 8 s, on each pilot's own clock.
+
+Flight time tells you the range: about 1.9 s at the near limit, 3.8 s at the far one,
+and the horde keeps walking all the while, so a shell is aimed where the column is
+going rather than where it is. Server and client solve the same closed-form ballistics
+(`packages/shared/src/mortar.ts`), so the dashed arc you aimed along is exactly the
+path the server detonates the shell on — and nothing about a shell's flight has to be
+sent per frame.
+
 ## Multiplayer
 
 - **Create Game** — generates a 4-character room code.
@@ -107,6 +142,7 @@ Open **http://localhost:5173** in your browser.
 - Each player pilots their own drone independently.
 - Shared outpost HP and horde state.
 - Every pilot sees the other pilots' drones in the air (colour-coded per player, with a callsign tag and a smoke trail).
+- Weapons are per pilot: switching between the quad and the mortar, and each mortar reload, is private to that pilot, while every shell, crater and kill is shared. Only the shooter's own camera leaves the fort to watch a shell land.
 
 ## Game Mechanics
 
@@ -115,8 +151,12 @@ Open **http://localhost:5173** in your browser.
 | Drone speed | 15 m/s (30 m/s boosted) |
 | Max flight time | 20 s |
 | Max distance | 175 m from outpost |
-| Kill radius | 3 m |
-| Reload time | 5 s |
+| Drone kill radius | 3 m |
+| Drone reload | 5 s |
+| Mortar ring of fire | 30–120 m from the fort, laid at a fixed 60° elevation |
+| Mortar shell | 9 m blast — kills everything it catches, tank included, and lands one heavy hit on any building inside it |
+| Mortar reload | 8 s per pilot |
+| Mortar flight | 1.9 s at 30 m → 3.8 s at 120 m, apex 15–54 m |
 | Horde spawn rate | 0.35 → 1.6 enemies/s (ramps over 9 min, ×players) |
 | Threat level | +1 every 45 s |
 | Spawn directions | weighted to the village: 40% north, 40% east, 10% west, 10% south (out on the map border, 142–149 m from the fort) |
@@ -167,6 +207,22 @@ thing on the field; the tank rolls on tracked runs with a rotating turret and is
 the only unit that survives a hit. All three are built from primitives with
 rolling wheels, track links and decals so they stay readable during a 30 m/s
 pass.
+
+### The Fort
+
+The fort is an open fortified position standing in the middle of a field, not a
+building: the fight happens in the courtyard behind the wire, and the sky above it is
+clear, so a quad always has a way out.
+
+| Piece | What it is |
+|-------|-----------|
+| Berm and wire | An earth berm on all four sides, sandbag revetment along the crest and a fence on top. Reaching this line is what counts as a breach (`FORT_PERIMETER`, 12.5 m from the centre) |
+| Firing platforms | Sandbagged decks on posts at all four corners — the lookouts of the position |
+| Command bunker | North-west: a roofless concrete bunker, a revetted pit to shelter in rather than a roof a drone can fly into |
+| Drone pad | South-west: the FPV quad on a marked concrete slab with its guidance mast |
+| Mortar pad | South-east: the tube on a poured slab, firing clear over the berm |
+| Gate | South face: the vehicle gap in the berm, sandbagged at the flanks |
+| Flag | An 11 m pole flying the Ukrainian blue-and-yellow over the courtyard |
 
 ### The Village
 

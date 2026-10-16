@@ -1,3 +1,5 @@
+import { WeaponType } from '@red-attack/shared';
+
 export interface InputState {
   forward: number;
   yawDelta: number;   // incremental yaw from mouse + A/D keys
@@ -29,6 +31,10 @@ export class InputManager {
   onLaunch: (() => void) | null = null;
   onSelfDestruct: (() => void) | null = null;
   onToggleKeysGuide: (() => void) | null = null;
+  /** Pick a weapon outright (1 = quad, 2 = mortar). */
+  onSelectWeapon: ((weapon: WeaponType) => void) | null = null;
+  /** Flip to the other weapon without naming it (Tab). */
+  onCycleWeapon: (() => void) | null = null;
   /** Tells the UI to show/hide the "click to resume mouse look" hint. */
   onLockHintChange: ((show: boolean) => void) | null = null;
 
@@ -66,6 +72,18 @@ export class InputManager {
       }
       if (e.code === 'KeyH') {
         if (this.onToggleKeysGuide) this.onToggleKeysGuide();
+      }
+      if (e.code === 'Digit1' || e.code === 'Numpad1') {
+        e.preventDefault();
+        if (this.onSelectWeapon) this.onSelectWeapon(WeaponType.FPV);
+      }
+      if (e.code === 'Digit2' || e.code === 'Numpad2') {
+        e.preventDefault();
+        if (this.onSelectWeapon) this.onSelectWeapon(WeaponType.MORTAR);
+      }
+      if (e.code === 'Tab') {
+        e.preventDefault(); // otherwise Tab walks the keyboard focus off the canvas
+        if (this.onCycleWeapon) this.onCycleWeapon();
       }
       if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
         e.preventDefault(); // arrows tilt the drone instead of scrolling the page

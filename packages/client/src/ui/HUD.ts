@@ -1,4 +1,4 @@
-import { GameState, PlayerState, DroneData } from '@red-attack/shared';
+import { GameState, PlayerState, DroneData, PlayerData, WeaponType } from '@red-attack/shared';
 import { DRONE_MAX_FLIGHT_TIME } from '@red-attack/shared';
 
 export class HUD {
@@ -18,6 +18,11 @@ export class HUD {
   private flSpd: HTMLElement;
   private flDist: HTMLElement;
   private flTime: HTMLElement;
+  private weaponPanel: HTMLElement;
+  private wpFpv: HTMLElement;
+  private wpMortar: HTMLElement;
+  private wpFpvState: HTMLElement;
+  private wpMortarState: HTMLElement;
   private keysGuide: HTMLElement;
   private kgLaunch: HTMLElement;
   private keysGuideVisible: boolean;
@@ -39,6 +44,11 @@ export class HUD {
     this.flSpd = document.getElementById('fl-spd')!;
     this.flDist = document.getElementById('fl-dist')!;
     this.flTime = document.getElementById('fl-time')!;
+    this.weaponPanel = document.getElementById('weapon-panel')!;
+    this.wpFpv = document.getElementById('wp-fpv')!;
+    this.wpMortar = document.getElementById('wp-mortar')!;
+    this.wpFpvState = document.getElementById('wp-fpv-state')!;
+    this.wpMortarState = document.getElementById('wp-mortar-state')!;
     this.keysGuide = document.getElementById('keys-guide')!;
     this.kgLaunch = document.getElementById('kg-launch')!;
     this.keysGuideVisible = HUD.readKeysGuidePref();
@@ -75,17 +85,31 @@ export class HUD {
     // Drone status — find local player by sessionId
     const player = state.players.find(p => p.id === localSessionId);
     if (player) {
+      // Two weapons, one fire button: what SPACE does, and what the status line
+      // counts down, depends on which station the pilot is manning.
+      const mortarMode = (player.weapon ?? WeaponType.FPV) === WeaponType.MORTAR;
+      const mortarWait = Math.max(
+        0, Math.ceil(((player.mortarReadyAt ?? 0) - state.serverTime) / 1000));
+      const droneWait = player.state === PlayerState.COOLDOWN
+        ? Math.max(0, Math.ceil((player.cooldownUntil - state.serverTime) / 1000))
+        : 0;
       if (player.state === PlayerState.PILOTING) {
         this.droneStatus.textContent = '🛩️ In Flight';
         this.crosshair.classList.add('show');
+      } else if (mortarMode) {
+        // The tube is laid and loaded, and the crosshair doubles as its aim ray.
+        this.droneStatus.textContent = mortarWait > 0
+          ? `⏳ Mortar reload: ${mortarWait}s`
+          : '💥 Press SPACE to fire';
+        this.crosshair.classList.add('show');
       } else if (player.state === PlayerState.COOLDOWN) {
-        const remaining = Math.max(0, Math.ceil((player.cooldownUntil - state.serverTime) / 1000));
-        this.droneStatus.textContent = `⏳ Reload: ${remaining}s`;
+        this.droneStatus.textContent = `⏳ Reload: ${droneWait}s`;
         this.crosshair.classList.remove('show');
       } else {
         this.droneStatus.textContent = '✅ Press SPACE to launch';
         this.crosshair.classList.remove('show');
       }
+      this.updateWeaponPanel(player, mortarWait, droneWait);
       this.scoreDisplay.textContent = `Score: ${player.score}`;
 
       // Key guide: pulse the Space row while a launch is available.
@@ -109,6 +133,20 @@ export class HUD {
         this.flightPanel.style.display = 'none';
       }
     }
+  }
+
+  /** The weapon rack: which station is manned, and what each one is doing. */
+  private updateWeaponPanel(player: PlayerData, mortarWait: number, droneWait: number) {
+    if (!this.weaponPanel) return;
+    const fpvOn = (player.weapon ?? WeaponType.FPV) === WeaponType.FPV;
+    this.wpFpv.classList.toggle('on', fpvOn);
+    this.wpMortar.classList.toggle('on', !fpvOn);
+    this.wpFpvState.textContent = player.state === PlayerState.PILOTING
+      ? 'IN FLIGHT'
+      : (droneWait > 0 ? `RELOAD ${droneWait}s` : 'READY');
+    this.wpMortarState.textContent = mortarWait > 0 ? `RELOAD ${mortarWait}s` : 'READY';
+    this.wpFpv.classList.toggle('cool', droneWait > 0);
+    this.wpMortar.classList.toggle('cool', mortarWait > 0);
   }
 
   /** Show/hide the on-screen FPV key guide (bound to the H key). */

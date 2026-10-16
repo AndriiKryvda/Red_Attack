@@ -118,6 +118,36 @@ const SANDBAG_GEO = (() => {
   return g;
 })();
 
+/**
+ * Top of the berm crest: six courses of bags, the crown of the highest one
+ * included. The heavy machine guns stand on this, so the number is shared by the
+ * wall that carries them and the nests bolted to it.
+ */
+const CREST_Y = BAG_H + (6 - 1) * BAG_ROW;   // 0.44 + 1.90 = 2.34 m
+
+// ─── Belts of linked rounds ─────────────────────────────────────────────────
+// A belt is a chain of steel links with a brass round held in each, so it is two
+// instanced meshes fed from one list of transforms - the same trick the sandbags
+// use, and what lets a gun carry sixty rounds for two draw calls.
+
+/** One link waiting to be placed: a position and the way it points along the belt. */
+interface BeltLink {
+  x: number; y: number; z: number;
+  q: THREE.Quaternion;
+}
+
+/** The clip a belt is made of; its long axis is the direction the belt runs. */
+const BELT_LINK_GEO = new THREE.BoxGeometry(0.075, 0.055, 0.105);
+
+/** The round in the clip, a touch longer than the link so both ends show brass. */
+const BELT_CASE_GEO = (() => {
+  const g = new THREE.CylinderGeometry(0.026, 0.026, 0.135, 6);
+  g.rotateX(Math.PI / 2);   // the nose points along +Z, the way the belt runs
+  return g;
+})();
+
+const FORWARD = new THREE.Vector3(0, 0, 1);
+
 function pushBag(bags: Bag[], x: number, y: number, z: number, yaw: number, jitter: number) {
   bags.push({
     x: x + (Math.random() - 0.5) * jitter,
@@ -217,7 +247,8 @@ function flushSandbags(group: THREE.Group, bags: Bag[], mat: THREE.Material) {
 
 /**
  * The fort: an open fortified position rather than a building. A packed-dirt
- * courtyard inside a sandbag berm with corner firing platforms, a roofless
+ * courtyard inside a sandbag berm with corner firing platforms, a heavy machine
+ * gun on a pedestal on the crest of each face, a roofless
  * sandbag command bunker, a drone launch pad and the mortar slab - the pilot
  * stands in the middle of the yard and turns to face whatever is coming.
  *
@@ -228,6 +259,7 @@ function flushSandbags(group: THREE.Group, bags: Bag[], mat: THREE.Material) {
 export function createOutpost(): THREE.Group {
   const group = new THREE.Group();
   const bags: Bag[] = [];
+  const links: BeltLink[] = [];
   const mats: FortMats = {
     earth: standardMaterial('dirt', { rx: 5, ry: 5, color: 0x9c8a6b, roughness: 1 }),
     concrete: standardMaterial('concrete', { rx: 3, ry: 3, roughness: 0.95 }),
@@ -273,7 +305,17 @@ export function createOutpost(): THREE.Group {
   buildGate(group, bags, mats);
   buildFlag(group, bags, mats, 0, -3.4);
 
+  // One heavy machine gun on the crest of every face, covering the ground its own
+  // wall looks out over. Each is laid a few degrees off square so the four do not
+  // read as one copy-pasted model. The south gun stands west of the gate: the gap
+  // in the middle of that face is where the vehicles drive through.
+  hmgNest(group, mats, links, 0, -HALF, Math.PI + 0.16);
+  hmgNest(group, mats, links, HALF, 0, Math.PI / 2 - 0.1);
+  hmgNest(group, mats, links, -6.5, HALF, 0.12);
+  hmgNest(group, mats, links, -HALF, 0, -Math.PI / 2 + 0.08);
+
   flushSandbags(group, bags, mats.bag);
+  flushBeltLinks(group, links);
 
   group.position.y = 0; // on flat ground
   return group;
@@ -504,3 +546,164 @@ function buildFlag(
   };
   group.add(truck);
 }
+
+// ─── Heavy machine guns ─────────────────────────────────────────────────────
+
+/**
+ * Lay a run of belt along a curve given in one gun's own frame and drop the links
+ * into the fort-wide list in world space.
+ *
+ * Every link is turned to point along the belt, which is what makes a drooping run
+ * read as a strip of links that is hanging under its own weight rather than a row
+ * of boxes all facing the same way.
+ */
+function beltRun(
+  links: BeltLink[], m: THREE.Matrix4, pts: THREE.Vector3[], count: number, closed = false,
+) {
+  const curve = new THREE.CatmullRomCurve3(pts, closed, 'catmullrom', 0.35);
+  // The gun only turns and shifts, so the upper three by three of its matrix is
+  // the whole local-to-world rotation the belt tangents need.
+  const rot = new THREE.Matrix3().setFromMatrix4(m);
+  const dir = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    const t = closed ? i / count : i / Math.max(1, count - 1);
+    const p = curve.getPointAt(t).applyMatrix4(m);
+    dir.copy(curve.getTangentAt(t)).applyMatrix3(rot).normalize();
+    links.push({
+      x: p.x, y: p.y, z: p.z,
+      q: new THREE.Quaternion().setFromUnitVectors(FORWARD, dir),
+    });
+  }
+}
+
+/** The gathered links become two instanced meshes: the clips and the rounds. */
+function flushBeltLinks(group: THREE.Group, links: BeltLink[]) {
+  const clipMat = standardMaterial('metal', { rx: 1, ry: 1, color: 0x3a3d36, metalness: 0.7, roughness: 0.55 });
+  const brassMat = standardMaterial('metal', { rx: 1, ry: 1, color: 0xc08a3e, metalness: 0.85, roughness: 0.35 });
+
+  const clips = new THREE.InstancedMesh(BELT_LINK_GEO, clipMat, links.length);
+  const cases = new THREE.InstancedMesh(BELT_CASE_GEO, brassMat, links.length);
+  const m = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  const off = new THREE.Vector3();
+  const one = new THREE.Vector3(1, 1, 1);
+  links.forEach((b, i) => {
+    p.set(b.x, b.y, b.z);
+    m.compose(p, b.q, one);
+    clips.setMatrixAt(i, m);
+    // The round sits proud of its clip, so the belt shows brass along its whole
+    // length instead of reading as one dark band.
+    off.set(0, 0.045, 0).applyQuaternion(b.q).add(p);
+    m.compose(off, b.q, one);
+    cases.setMatrixAt(i, m);
+  });
+  clips.instanceMatrix.needsUpdate = true;
+  cases.instanceMatrix.needsUpdate = true;
+  clips.castShadow = true;
+  cases.castShadow = true;
+  group.add(clips, cases);
+}
+
+/**
+ * A heavy machine gun nest on the crest of one face of the berm: a timber deck,
+ * the gun on a pintle pedestal, an ammo can beside it and two belts of linked
+ * rounds - one running from the can up into the feed tray, one coiled on the deck
+ * ready to be hooked on.
+ *
+ * The gun is built facing its own local +Z and then turned out over the ground its
+ * own wall looks over. Like everything else here it is scenery and no collision
+ * volume: the weapons that fire are the quad and the tube.
+ */
+function hmgNest(
+  group: THREE.Group, mats: FortMats, links: BeltLink[],
+  x: number, z: number, yaw: number,
+) {
+  const gunMetal = standardMaterial('metal', { rx: 1, ry: 2, color: 0x3c4038, metalness: 0.85, roughness: 0.45 });
+  const dark = standardMaterial('metal', { rx: 1, ry: 1, color: 0x24261f, metalness: 0.6, roughness: 0.7 });
+  const olive = standardMaterial('fabric', { rx: 1, ry: 1, color: 0x4b5140, roughness: 0.9 });
+
+  // Deck plate: bags are too round to bolt a pedestal to, and the crew wants a
+  // flat floor to work on anyway.
+  addBox(group, mats.timber, 1.7, 0.14, 1.7, x, CREST_Y + 0.07, z);
+
+  const g = new THREE.Group();
+  g.position.set(x, CREST_Y + 0.14, z);
+  g.rotation.y = yaw;
+  group.add(g);
+
+  // Pedestal: a base plate on the deck, a tapered column, and the traverse yoke
+  // the gun sits in.
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.44, 0.1, 16), dark);
+  base.position.y = 0.05;
+  base.castShadow = true;
+  g.add(base);
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.17, 0.86, 12), gunMetal);
+  column.position.y = 0.53;
+  column.castShadow = true;
+  g.add(column);
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.1, 14), dark);
+  collar.position.y = 0.95;
+  g.add(collar);
+  for (const sx of [-0.19, 0.19]) {
+    addBox(g, dark, 0.09, 0.3, 0.36, sx, 1.02, 0);
+  }
+
+  // The gun: receiver and bolt, spade grips at the back, and a heavy barrel with
+  // cooling rings, a muzzle brake and a sight at each end.
+  addBox(g, gunMetal, 0.17, 0.21, 0.72, 0, 1.12, 0.02);
+  addBox(g, dark, 0.13, 0.1, 0.34, 0, 1.26, -0.06);
+  addBox(g, dark, 0.3, 0.2, 0.08, 0, 1.12, -0.4);
+  for (const sx of [-0.17, 0.17]) {
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.24, 8), dark);
+    grip.position.set(sx, 1.16, -0.56);
+    grip.rotation.x = 0.5;
+    grip.castShadow = true;
+    g.add(grip);
+  }
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 1.05, 12), gunMetal);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 1.16, 0.9);
+  barrel.castShadow = true;
+  g.add(barrel);
+  for (let i = 0; i < 5; i++) {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.03, 12), dark);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(0, 1.16, 0.55 + i * 0.16);
+    g.add(ring);
+  }
+  const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.22, 12), gunMetal);
+  brake.rotation.x = Math.PI / 2;
+  brake.position.set(0, 1.16, 1.5);
+  brake.castShadow = true;
+  g.add(brake);
+  addBox(g, dark, 0.03, 0.11, 0.03, 0, 1.28, 1.32);
+  addBox(g, dark, 0.1, 0.1, 0.05, 0, 1.36, 0.12);
+
+  // Ammo can on the deck to the gun's right, its lid left a touch ajar.
+  addBox(g, olive, 0.52, 0.34, 0.36, 0.58, 0.17, -0.3);
+  addBox(g, dark, 0.54, 0.05, 0.38, 0.58, 0.36, -0.32, 0.06);
+
+  // Belt one: out of the can, across the deck and up the left of the pedestal
+  // into the feed tray.
+  const m = new THREE.Matrix4().makeRotationY(yaw).setPosition(x, CREST_Y + 0.14, z);
+  beltRun(links, m, [
+    new THREE.Vector3(0.5, 0.4, -0.3),
+    new THREE.Vector3(0.3, 0.16, -0.05),
+    new THREE.Vector3(-0.05, 0.12, 0.2),
+    new THREE.Vector3(-0.34, 0.42, 0.26),
+    new THREE.Vector3(-0.4, 0.84, 0.16),
+    new THREE.Vector3(-0.3, 1.04, 0.16),
+    new THREE.Vector3(-0.1, 1.13, 0.02),
+  ], 26);
+
+  // Belt two: the spare, coiled flat on the deck where a loader can grab it.
+  const coil: THREE.Vector3[] = [];
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    coil.push(new THREE.Vector3(
+      -0.56 + Math.cos(a) * 0.26, 0.05, -0.6 + Math.sin(a) * 0.2,
+    ));
+  }
+  beltRun(links, m, coil, 18, true);
+}
+

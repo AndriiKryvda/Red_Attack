@@ -220,6 +220,7 @@ clear, so a quad always has a way out.
 |-------|-----------|
 | Berm and wire | Sandbags on all four sides — three bags thick, six courses high — with a fence on top. Reaching this line is what counts as a breach (`FORT_PERIMETER`, 12.5 m from the centre) |
 | Firing platforms | Sandbagged decks on posts at all four corners — the lookouts of the position |
+| HMG nests | A heavy machine gun on a pintle pedestal on the crest of each of the four faces, on a timber deck, with an ammo can and two belts of linked rounds — one fed into the gun, one coiled ready |
 | Command bunker | North-west: a roofless bunker of sandbag walls on a poured floor, a revetted pit to shelter in rather than a roof a drone can fly into |
 | Drone pad | South-west: the FPV quad on a marked concrete slab with its guidance mast |
 | Mortar pad | South-east: the tube on a poured slab, firing clear over the berm |

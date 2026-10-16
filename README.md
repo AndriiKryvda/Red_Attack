@@ -74,25 +74,28 @@ Open **http://localhost:5173** in your browser.
 
 ## Controls
 
-Two stations, one key each: `1` mans the FPV drone pad, `2` mans the tube mortar and
-`Tab` swaps between them. `Space` then does whatever the manned station does — launch
-the quad, or send a shell at wherever the fort view is pointing. With the tube manned,
-the left mouse button is a second trigger for the same shell.
+Six stations, one key each: `1` mans the FPV drone pad, `2` mans the tube mortar and
+`3`–`6` man the four heavy machine guns on the berm. `Tab` walks through all six in
+that order. `Space` then does whatever the manned station does — launch the quad, send
+a shell at wherever the fort view is pointing, or run the belt of the gun you are
+standing at. With the tube manned, the left mouse button is a second trigger for the
+same shell; on a machine gun it is the same held trigger as `Space`.
 
 ### Keys
 
 | Key | Action |
 |-----|--------|
 | **1 / 2** | Man the FPV drone pad / man the tube mortar |
-| **Tab** | Swap between the two weapons |
+| **3 / 4 / 5 / 6** | Man the north / east / south / west machine gun |
+| **Tab** | Walk to the next station (drone → mortar → the four guns → drone) |
 | **W / S** | Forward / backward thrust (in drone's facing direction) |
-| **A / D** | Yaw rotation (rotate drone left / right) |
-| **Mouse X** | Yaw rotation (additive with A/D) |
-| **Mouse Y** | Pitch (tilt nose up / down) |
+| **A / D** | Yaw rotation (additive with mouse); on a gun, traverse left / right |
+| **Mouse X** | Yaw rotation (additive with A/D); on a gun, lay the barrel |
+| **Mouse Y** | Pitch (tilt nose up / down); on a gun, elevate within the pintle's limits |
 | **↑ / ↓** or **Q / E** | Pitch (tilt nose up / down) — keyboard equivalent of mouse Y |
-| **Space** | Ascend (throttle up); when waiting at the fort: launch the drone or fire the mortar |
+| **Space** | Ascend (throttle up); at the fort: launch, fire the mortar, or hold to run a gun's belt |
 | **Shift** | Descend (throttle down) |
-| **LMB** | Boost (2× speed); with the tube manned, fires the mortar |
+| **LMB** | Boost (2× speed); with the tube manned, fires the mortar; on a gun, the held trigger |
 | **R** | Self-destruct drone |
 | **H** | Show / hide the on-screen key guide (remembered between sessions) |
 | **Click** | Recapture the mouse after alt-tabbing away or pressing `Esc` |
@@ -135,6 +138,34 @@ going rather than where it is. Server and client solve the same closed-form ball
 (`packages/shared/src/mortar.ts`), so the dashed arc you aimed along is exactly the
 path the server detonates the shell on — and nothing about a shell's flight has to be
 sent per frame.
+
+### The Machine Guns
+
+Four heavy machine guns sit on the crest of the four faces of the berm, numbered
+`3`–`6` clockwise from the north face. They are the fort's close defence: where the
+mortar owns the middle of the field and the quad owns the border, a gun owns the last
+seventy metres of dirt in front of its own wall — and nothing beyond it.
+
+1. **Man it** — press `3`, `4`, `5` or `6` (or `Tab` until you get there). The view
+   moves to the gunner's seat behind the spade grips and narrows to the gun optic.
+2. **Aim** — the mouse lays the barrel: side to side is traverse, up and down is
+   elevation, and the pintle only allows the gun to look down at the wire or up over
+   the crest (−35° to +8°). `A`/`D` and `↑`/`↓` do the same thing from the keyboard.
+3. **Fire** — hold `Space` or the left mouse button. The belt runs at 600 rounds a
+   minute while the key is down, the muzzle climbs a little under recoil, and the
+   view kicks with the gun.
+4. **Belt** — 120 rounds, twelve seconds of firing. When a belt runs dry the crew
+   swaps the can, and any gun that has been quiet for ten seconds is full again, so
+   a gun you walked away from is ready when you come back to it.
+
+What the guns are not: artillery, and not an anti-tank weapon. A round is worth
+something out to 70 m and stops there, so a burst laid on the village does nothing;
+and a tank shrugs small arms off entirely, which stays the quad's problem. As with
+every other weapon the server owns the shot — the belt, the cyclic rate, the hits and
+the swap are all resolved server-side (`tickHmgs` in `packages/server/src/rooms/GameRoom.ts`),
+and the client only streams the lay and the trigger the way it streams drone input.
+Each round comes back as an `hmg_shot` event carrying the ray it flew and how far it
+was worth, which is what every client draws the tracer to.
 
 ## Multiplayer
 

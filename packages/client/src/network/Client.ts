@@ -9,6 +9,9 @@ export class NetworkClient {
   private eventCallbacks: ((event: ServerEvent) => void)[] = [];
   private inputRate: number = 0;
   private readonly INPUT_INTERVAL = 50;
+  /** Machine gun lay: a little quicker than drone input so a release lands fast. */
+  private hmgRate: number = 0;
+  private readonly HMG_INTERVAL = 40;
   private _sessionId: string = '';
 
   constructor() {
@@ -90,6 +93,20 @@ export class NetworkClient {
         up: input.up,
         boost: input.boost,
       });
+    }
+  }
+
+  /**
+   * Rate-limited lay and trigger of a manned machine gun. The gun fires on the
+   * server's clock, so what a client has to keep saying is where the barrel is and
+   * that a hand is still on the grips; the server stops the belt if the talk stops.
+   */
+  sendHmgInput(gun: number, yaw: number, pitch: number, firing: boolean) {
+    const now = performance.now();
+    if (now - this.hmgRate < this.HMG_INTERVAL) return;
+    this.hmgRate = now;
+    if (this.room) {
+      this.room.send('hmg_input', { type: 'hmg_input', gun, yaw, pitch, firing });
     }
   }
 

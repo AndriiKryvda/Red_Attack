@@ -1,4 +1,4 @@
-import { GameState, PlayerState, DroneData, PlayerData, WeaponType } from '@red-attack/shared';
+import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf } from '@red-attack/shared';
 import { DRONE_MAX_FLIGHT_TIME } from '@red-attack/shared';
 
 export class HUD {
@@ -23,6 +23,9 @@ export class HUD {
   private wpMortar: HTMLElement;
   private wpFpvState: HTMLElement;
   private wpMortarState: HTMLElement;
+  /** One row and one state cell per machine gun, in the order the nests are numbered. */
+  private wpHmg: HTMLElement[] = [];
+  private wpHmgState: HTMLElement[] = [];
   private keysGuide: HTMLElement;
   private kgLaunch: HTMLElement;
   private keysGuideVisible: boolean;
@@ -49,6 +52,15 @@ export class HUD {
     this.wpMortar = document.getElementById('wp-mortar')!;
     this.wpFpvState = document.getElementById('wp-fpv-state')!;
     this.wpMortarState = document.getElementById('wp-mortar-state')!;
+    // The four gun rows are looked up rather than written out: the panel and the
+    // nests are numbered the same way, 3 to 6.
+    for (let i = 1; i <= HMG_NESTS.length; i++) {
+      const row = document.getElementById(`wp-hmg-${i}`);
+      const state = document.getElementById(`wp-hmg-state-${i}`);
+      if (!row || !state) continue;
+      this.wpHmg.push(row);
+      this.wpHmgState.push(state);
+    }
     this.keysGuide = document.getElementById('keys-guide')!;
     this.kgLaunch = document.getElementById('kg-launch')!;
     this.keysGuideVisible = HUD.readKeysGuidePref();
@@ -87,6 +99,11 @@ export class HUD {
     if (player) {
       // Two weapons, one fire button: what SPACE does, and what the status line
       // counts down, depends on which station the pilot is manning.
+      const hmgGun = player.state === PlayerState.PILOTING ? -1 : hmgGunOf(player.weapon);
+      // A gun's swap timer is the moment its fresh belt goes in - the server sets it
+      // from the last round fired - so it is only worth showing once the belt is dry.
+      const hmgWait = (player.hmgReloadAt ?? []).map(t =>
+        Math.max(0, Math.ceil((t - state.serverTime) / 1000)));
       const mortarMode = (player.weapon ?? WeaponType.FPV) === WeaponType.MORTAR;
       const mortarWait = Math.max(
         0, Math.ceil(((player.mortarReadyAt ?? 0) - state.serverTime) / 1000));
@@ -95,6 +112,13 @@ export class HUD {
         : 0;
       if (player.state === PlayerState.PILOTING) {
         this.droneStatus.textContent = '🛩️ In Flight';
+        this.crosshair.classList.add('show');
+      } else if (hmgGun >= 0) {
+        // At a gun the crosshair is the barrel and the status line is the belt.
+        const left = player.hmgAmmo?.[hmgGun] ?? 0;
+        this.droneStatus.textContent = left > 0
+          ? `🔫 ${HMG_NESTS[hmgGun].label}: ${left} rounds`
+          : `⏳ Belt swap: ${hmgWait[hmgGun] ?? 0}s`;
         this.crosshair.classList.add('show');
       } else if (mortarMode) {
         // The tube is laid and loaded, and the crosshair doubles as its aim ray.
@@ -109,7 +133,7 @@ export class HUD {
         this.droneStatus.textContent = '✅ Press SPACE to launch';
         this.crosshair.classList.remove('show');
       }
-      this.updateWeaponPanel(player, mortarWait, droneWait);
+      this.updateWeaponPanel(player, mortarWait, droneWait, hmgGun, hmgWait);
       this.scoreDisplay.textContent = `Score: ${player.score}`;
 
       // Key guide: pulse the Space row while a launch is available.
@@ -136,17 +160,29 @@ export class HUD {
   }
 
   /** The weapon rack: which station is manned, and what each one is doing. */
-  private updateWeaponPanel(player: PlayerData, mortarWait: number, droneWait: number) {
+  private updateWeaponPanel(
+    player: PlayerData, mortarWait: number, droneWait: number,
+    hmgGun: number, hmgWait: number[],
+  ) {
     if (!this.weaponPanel) return;
-    const fpvOn = (player.weapon ?? WeaponType.FPV) === WeaponType.FPV;
+    const weapon = player.weapon ?? WeaponType.FPV;
+    const fpvOn = weapon === WeaponType.FPV;
     this.wpFpv.classList.toggle('on', fpvOn);
-    this.wpMortar.classList.toggle('on', !fpvOn);
+    this.wpMortar.classList.toggle('on', weapon === WeaponType.MORTAR);
     this.wpFpvState.textContent = player.state === PlayerState.PILOTING
       ? 'IN FLIGHT'
       : (droneWait > 0 ? `RELOAD ${droneWait}s` : 'READY');
     this.wpMortarState.textContent = mortarWait > 0 ? `RELOAD ${mortarWait}s` : 'READY';
     this.wpFpv.classList.toggle('cool', droneWait > 0);
     this.wpMortar.classList.toggle('cool', mortarWait > 0);
+    // The four guns: whose trigger is manned, and what is left in each belt. An
+    // empty one shows the swap countdown instead of a number.
+    for (let i = 0; i < this.wpHmg.length; i++) {
+      const ammo = player.hmgAmmo?.[i] ?? 0;
+      this.wpHmg[i].classList.toggle('on', i === hmgGun);
+      this.wpHmg[i].classList.toggle('cool', ammo <= 0);
+      this.wpHmgState[i].textContent = ammo > 0 ? `${ammo}` : `SWAP ${hmgWait[i] ?? 0}s`;
+    }
   }
 
   /** Show/hide the on-screen FPV key guide (bound to the H key). */

@@ -2,7 +2,10 @@ import { GameScene } from './scene/Scene';
 import { NetworkClient } from './network/Client';
 import { InputManager } from './input/InputManager';
 import { HUD } from './ui/HUD';
-import { ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS, WeaponType } from '@red-attack/shared';
+import {
+  ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS, WeaponType, PlayerState,
+  HMG_NESTS, HMG_WEAPONS, hmgGunOf,
+} from '@red-attack/shared';
 
 // ─── Bootstrap ─────────────────────────────────────────────
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -30,11 +33,63 @@ function localPlayer() {
   return state?.players.find(p => p.id === network.sessionId);
 }
 
+/**
+ * The stations Tab walks through, in the order the HUD lists them: the quad, the
+ * tube, then the four machine guns along the berm.
+ */
+const WEAPON_CYCLE: WeaponType[] = [
+  WeaponType.FPV, WeaponType.MORTAR, ...HMG_WEAPONS,
+];
+
+/**
+ * Take a station: tell the server, and hand the controls over to that station. On a
+ * gun the mouse lays the barrel instead of looking around the fort, so the input
+ * layer has to know the pilot is no longer just standing about.
+ */
+function selectWeapon(weapon: WeaponType): void {
+  network.sendSelectWeapon(weapon);
+  const gun = hmgGunOf(weapon);
+  input.setHmgMode(gun >= 0);
+  // Taking a crew starts from the lay that crew was left holding, which is exactly
+  // what the server resets its own copy of the gun to.
+  if (gun >= 0) input.resetHmgAim(HMG_NESTS[gun].yaw);
+}
+
+/**
+ * Which gun the local pilot is standing at, or -1 for none of them. A pilot with a
+ * quad in the air is flying it, not serving a crew-served weapon.
+ */
+function manningGun(): number {
+  const me = localPlayer();
+  if (!me || me.state === PlayerState.PILOTING) return -1;
+  return hmgGunOf(me.weapon);
+}
+
+/**
+ * While a hand is on a gun, its lay and its trigger go to the server every frame the
+ * way drone input does. The server owns the belt, the rate and the hits; this is only
+ * the gunner's hands, and it stops the moment he walks off the gun.
+ */
+function sendHmgInput(): void {
+  const gun = manningGun();
+  if (gun < 0) {
+    input.setHmgMode(false);
+    return;
+  }
+  input.setHmgMode(true);
+  const aim = input.getHmgAim();
+  scene.setHmgAim(aim.yaw, aim.pitch);
+  network.sendHmgInput(gun, aim.yaw, aim.pitch, aim.firing);
+}
+
 // Wire immediate-action callbacks (bypass rate limiter)
 // Space is the fire button for whichever weapon the pilot is manning: it launches
 // the quad, or it sends a shell from the mortar at wherever the fort view is
 // pointing. The server clamps the shot into the ring of fire either way.
 function fireWeapon() {
+  // On a machine gun the trigger is held and the server runs the belt, so the fire
+  // button has nothing to do here at all.
+  if (hmgGunOf(localPlayer()?.weapon) >= 0) return;
   if (localPlayer()?.weapon === WeaponType.MORTAR) {
     const aim = scene.getMortarAim();
     network.sendMortarFire(aim.x, aim.z);
@@ -51,10 +106,11 @@ input.onFireMouse = () => {
 };
 input.onSelfDestruct = () => { network.sendSelfDestruct(); };
 input.onToggleKeysGuide = () => { hud.toggleKeysGuide(); };
-input.onSelectWeapon = (weapon) => { network.sendSelectWeapon(weapon); };
+input.onSelectWeapon = (weapon) => { selectWeapon(weapon); };
 input.onCycleWeapon = () => {
-  const next = localPlayer()?.weapon === WeaponType.MORTAR ? WeaponType.FPV : WeaponType.MORTAR;
-  network.sendSelectWeapon(next);
+  const at = WEAPON_CYCLE.indexOf(localPlayer()?.weapon ?? WeaponType.FPV);
+  const next = WEAPON_CYCLE[(at + 1) % WEAPON_CYCLE.length];
+  selectWeapon(next);
 };
 
 // The browser drops the mouse capture whenever the window loses focus; the
@@ -145,6 +201,7 @@ function gameLoop(time: number) {
   if (gameStarted) {
     // Send continuous input to server (rate-limited internally)
     network.sendInput(input.getState());
+    sendHmgInput();
   }
 
   // Update scene from network state
@@ -162,6 +219,12 @@ requestAnimationFrame(gameLoop);
 
 // ─── Events from server ────────────────────────────────────
 network.onEvent((event) => {
+  if (event.type === 'hmg_shot') {
+    // Our own round kicks the lay: the muzzle climbs and wanders a touch, so a burst
+    // has to be walked onto a running target instead of painted on it.
+    if (event.ownerId === network.sessionId) input.addHmgRecoil();
+    return;
+  }
   if (event.type === 'horde_start') {
     hud.showAnnouncement('HORDE INCOMING');
   } else if (event.type === 'threat_level') {

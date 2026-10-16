@@ -21,6 +21,9 @@ import {
   WeaponType, clampMortarTarget, mortarBallistics, mortarShellHeight, MortarShot,
   MORTAR_POSITION, MORTAR_MUZZLE_HEIGHT, MORTAR_RELOAD_TIME, MORTAR_KILL_RADIUS,
   MORTAR_DAMAGE, MORTAR_BLAST_SCALE,
+  HMG_NESTS, HMG_BELT_SIZE, HMG_RELOAD_TIME, HMG_ROUNDS_PER_SEC, HMG_DAMAGE,
+  HMG_MAX_RANGE, HMG_SPREAD, HMG_INPUT_TIMEOUT, hmgGunOf, clampHmgPitch,
+  hmgDirection, hmgMuzzle,
 } from '@red-attack/shared';
 import { roomCodeRegistry } from '../index.js';
 
@@ -48,6 +51,14 @@ interface InternalDrone extends DroneData {
 
 interface InternalPlayer extends PlayerData {
   lastInput: number;
+  /** Rounds banked since the last one left each barrel, so the cyclic rate is exact. */
+  hmgFireAcc: number[];
+  /** Timestamp each belt last fired; HMG_RELOAD_TIME of quiet tops it back up. */
+  hmgLastShotAt: number[];
+  /** Timestamp the last lay arrived, so a trigger left down cannot stick forever. */
+  hmgInputAt: number;
+  /** Whether the trigger on the gun being manned is currently under. */
+  hmgFiring: boolean;
 }
 
 /** One mortar shell in the air, resolved in closed form on every tick. */
@@ -71,6 +82,11 @@ interface InternalShell {
  * without destroying it (the tank after the first hit).
  */
 const ARMOUR_HIT_SCORE_SHARE = 0.25;
+
+/** One value per machine gun nest, so per-gun player state stays in step. */
+function perGun(value: number): number[] {
+  return HMG_NESTS.map(() => value);
+}
 
 export class GameRoom extends Room {
   phase: GamePhase = GamePhase.LOBBY;
@@ -130,7 +146,16 @@ export class GameRoom extends Room {
       cooldownUntil: 0,
       weapon: WeaponType.FPV,
       mortarReadyAt: 0,
+      hmgAmmo: perGun(HMG_BELT_SIZE),
+      hmgReloadAt: perGun(0),
+      manningGun: -1,
+      hmgYaw: HMG_NESTS[0].yaw,
+      hmgPitch: 0,
       lastInput: Date.now(),
+      hmgFireAcc: perGun(0),
+      hmgLastShotAt: perGun(0),
+      hmgInputAt: 0,
+      hmgFiring: false,
     };
     this.players.set(id, player);
     console.log(`[Room] Player joined: ${player.name} (${id}). Total: ${this.players.size}`);
@@ -247,6 +272,7 @@ export class GameRoom extends Room {
       this.tickEnemies();
       this.tickDrones();
       this.tickShells();
+      this.tickHmgs();
       this.tickCooldowns();
     }
     this.broadcastState();
@@ -562,6 +588,118 @@ export class GameRoom extends Room {
     });
   }
 
+  // ─── Machine guns ────────────────────────────────────────
+  /**
+   * Fire every gun a pilot is currently holding the trigger on.
+   *
+   * The cyclic rate lives here and not in a browser: rounds leave a barrel on the
+   * server's clock, and the lay they leave it on is the lay the pilot last sent. A
+   * pilot whose connection stops talking stops firing after a moment, so a trigger
+   * left down on a dead tab cannot empty a belt into the dark.
+   */
+  private tickHmgs() {
+    const dt = TICK_RATE / 1000;
+    for (const player of this.players.values()) {
+      const gun = hmgGunOf(player.weapon);
+      // A pilot who walked off the gun, or who is up flying a quad, is not on it.
+      // Whatever the crew was doing with that belt, they have stopped, so the
+      // reload timer that runs off "not firing" is already ticking.
+      if (gun < 0 || player.state === PlayerState.PILOTING) {
+        player.manningGun = -1;
+        player.hmgFiring = false;
+        continue;
+      }
+      player.manningGun = gun;
+
+      const stale = this.serverTime - player.hmgInputAt > HMG_INPUT_TIMEOUT * 1000;
+      if (!player.hmgFiring || stale || player.hmgAmmo[gun] <= 0) {
+        player.hmgFireAcc[gun] = 0;
+        continue;
+      }
+      player.hmgFireAcc[gun] += HMG_ROUNDS_PER_SEC * dt;
+      while (player.hmgFireAcc[gun] >= 1 && player.hmgAmmo[gun] > 0) {
+        player.hmgFireAcc[gun] -= 1;
+        this.fireHmgRound(player, gun);
+      }
+      // A tick that banked less than a whole round keeps the fraction; a burst of
+      // rounds beyond one per tick would only mean the server stalled, so drop it.
+      if (player.hmgFireAcc[gun] > 1) player.hmgFireAcc[gun] = 0;
+    }
+  }
+
+  /** One round out of one gun: a belt spent, a ray traced, everybody told. */
+  private fireHmgRound(player: InternalPlayer, gun: number) {
+    player.hmgAmmo[gun] = Math.max(0, player.hmgAmmo[gun] - 1);
+    player.hmgLastShotAt[gun] = this.serverTime;
+    player.hmgReloadAt[gun] = this.serverTime + HMG_RELOAD_TIME * 1000;
+
+    const origin = hmgMuzzle(gun, player.hmgYaw, player.hmgPitch);
+    const dir = this.hmgSprayedDir(player.hmgYaw, player.hmgPitch);
+    const struck = this.hmgTrace(origin, dir, player.id);
+    this.broadcastEvent({
+      type: 'hmg_shot', gun, ownerId: player.id,
+      origin, dir,
+      range: struck ? struck.t : this.hmgRoundStop(origin, dir),
+      hit: struck !== null,
+    });
+  }
+
+  /**
+   * The lay the pilot asked for, sprayed by a fraction of a degree. A burst is not
+   * a laser, and the cone is what makes walking a gun onto a running soldier take a
+   * couple of extra rounds instead of being a hitscan aimbot.
+   */
+  private hmgSprayedDir(yaw: number, pitch: number): Vec3 {
+    const a = Math.random() * Math.PI * 2;
+    const r = HMG_SPREAD * Math.sqrt(Math.random());
+    return hmgDirection(yaw + Math.cos(a) * r, pitch + Math.sin(a) * r);
+  }
+
+  /**
+   * How far a round is worth flying: out to the gun's effective range, or down to
+   * the dirt if it was laid low enough to find it first. Tracers stop here too, so
+   * a burst aimed at the sky does not paint a line across half the map.
+   */
+  private hmgRoundStop(origin: Vec3, dir: Vec3): number {
+    if (dir.y < -0.0001) return Math.min(HMG_MAX_RANGE, origin.y / -dir.y);
+    return HMG_MAX_RANGE;
+  }
+
+  /**
+   * One round down the range, and the damage it does.
+   *
+   * Two things this deliberately never touches: the tank, which shrugs small arms
+   * off entirely and stays the quad's problem, and the village out on the far edge,
+   * which is both past the gun's reach and simply not in the list of things a round
+   * is checked against. What is left is the horde in front of the wall.
+   */
+  private hmgTrace(
+    origin: Vec3, dir: Vec3, shooterId: string,
+  ): { enemy: InternalEnemy; t: number } | null {
+    const stop = this.hmgRoundStop(origin, dir);
+    let best: InternalEnemy | null = null;
+    let bestT = stop;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.dead || enemy.type === EnemyType.TANK) continue;
+      const stats = ENEMY_STATS[enemy.type];
+      const radius = Math.max(0.55, stats.size * 0.45);
+      const ox = enemy.position.x - origin.x;
+      const oy = stats.size * 0.5 - origin.y;
+      const oz = enemy.position.z - origin.z;
+      const t = ox * dir.x + oy * dir.y + oz * dir.z;
+      if (t <= 0 || t > bestT) continue;
+      const px = ox - dir.x * t;
+      const py = oy - dir.y * t;
+      const pz = oz - dir.z * t;
+      if (px * px + py * py + pz * pz > radius * radius) continue;
+      best = enemy;
+      bestT = t;
+    }
+    if (!best) return null;
+    this.damageEnemy(best, shooterId, HMG_DAMAGE, false);
+    return { enemy: best, t: bestT };
+  }
+
   // ─── Drone Physics ───────────────────────────────────────
   private tickDrones() {
     const dt = TICK_RATE / 1000;
@@ -636,17 +774,24 @@ export class GameRoom extends Room {
   }
 
   /**
-   * Applies one detonation to an enemy and returns true if it died. One unit of
-   * damage is a quad's payload; the mortar arrives with a heavier one and clears
-   * the whole armour table in a single shell. Armoured units (the tank) soak a
-   * hit, catch fire and keep driving, so they need a second quad to finish them.
+   * Applies one hit to an enemy and returns true if it died. One unit of damage is a
+   * quad's payload; the mortar arrives with a heavier one and clears the whole
+   * armour table in a single shell, while a machine gun round is a fraction of one.
+   * Armoured units (the tank) soak a hit, catch fire and keep driving, so they need
+   * a second quad to finish them.
+   *
+   * `heavy` says whether this was a strike worth announcing: a quad or a shell
+   * ignites the target, pays a share of its worth for the hit and tells every client
+   * about it. A machine gun round is neither: it just chips the armour, and a burst
+   * of ten of them is not about to send ten `enemy_hit` events down the wire.
    */
-  private damageEnemy(enemy: InternalEnemy, killerId: string, damage = 1): boolean {
+  private damageEnemy(enemy: InternalEnemy, killerId: string, damage = 1, heavy = true): boolean {
     const stats = ENEMY_STATS[enemy.type];
     const player = this.players.get(killerId);
     enemy.hp = Math.max(0, enemy.hp - damage * stats.armour);
 
     if (enemy.hp > 0) {
+      if (!heavy) return false;
       enemy.burning = true;
       if (player) player.score += Math.round(stats.score * ARMOUR_HIT_SCORE_SHARE);
       this.broadcastEvent({
@@ -696,14 +841,37 @@ export class GameRoom extends Room {
       case 'player_name':
         player.name = msg.name;
         break;
-      case 'select_weapon':
+      case 'select_weapon': {
         // Swapping stations is free and always allowed. A pilot mid-flight keeps
         // flying the quad they already have; the choice only gates what the next
         // launch does.
-        if (msg.weapon === WeaponType.FPV || msg.weapon === WeaponType.MORTAR) {
+        const gun = hmgGunOf(msg.weapon);
+        if (msg.weapon === WeaponType.FPV || msg.weapon === WeaponType.MORTAR || gun >= 0) {
           player.weapon = msg.weapon;
+          if (gun >= 0) {
+            // Taking over a crew starts from the lay that crew was holding, and
+            // from a trigger nobody has his hand on.
+            player.hmgYaw = HMG_NESTS[gun].yaw;
+            player.hmgPitch = 0;
+            player.hmgFireAcc[gun] = 0;
+            player.hmgFiring = false;
+            player.hmgInputAt = this.serverTime;
+          }
         }
         break;
+      }
+      case 'hmg_input': {
+        // Only the gun the pilot is standing at, and only while he is not up in a
+        // quad. The lay is his, the elevation is clamped to the pintle, and whether
+        // a round actually leaves the barrel is decided on the tick.
+        const gun = hmgGunOf(player.weapon);
+        if (gun < 0 || msg.gun !== gun || player.state === PlayerState.PILOTING) break;
+        if (typeof msg.yaw === 'number' && msg.yaw === msg.yaw) player.hmgYaw = msg.yaw;
+        player.hmgPitch = clampHmgPitch(msg.pitch);
+        player.hmgFiring = msg.firing === true;
+        player.hmgInputAt = this.serverTime;
+        break;
+      }
       case 'mortar_fire':
         if (
           player.weapon === WeaponType.MORTAR
@@ -767,6 +935,27 @@ export class GameRoom extends Room {
         player.state = PlayerState.WAITING;
         player.cooldownUntil = 0;
       }
+      this.reloadHmgs(player);
+    }
+  }
+
+  /**
+   * A gun that has not been fired for HMG_RELOAD_TIME seconds has a full belt in it
+   * again: the crew that was not shooting spent that time hooking a fresh can up to
+   * the feed tray. One rule covers both cases that matter — a belt run empty, and a
+   * gun its pilot simply walked away from — so changing stations never needs a
+   * reload of its own.
+   */
+  private reloadHmgs(player: InternalPlayer) {
+    for (let gun = 0; gun < player.hmgAmmo.length; gun++) {
+      if (player.hmgAmmo[gun] >= HMG_BELT_SIZE) {
+        player.hmgReloadAt[gun] = 0;
+        continue;
+      }
+      if (this.serverTime - player.hmgLastShotAt[gun] >= HMG_RELOAD_TIME * 1000) {
+        player.hmgAmmo[gun] = HMG_BELT_SIZE;
+        player.hmgReloadAt[gun] = 0;
+      }
     }
   }
 
@@ -819,6 +1008,8 @@ export class GameRoom extends Room {
         score: p.score, ready: p.ready,
         droneId: p.droneId, cooldownUntil: p.cooldownUntil,
         weapon: p.weapon, mortarReadyAt: p.mortarReadyAt,
+        hmgAmmo: p.hmgAmmo, hmgReloadAt: p.hmgReloadAt,
+        manningGun: p.manningGun, hmgYaw: p.hmgYaw, hmgPitch: p.hmgPitch,
       })),
       serverTime: this.serverTime,
     };

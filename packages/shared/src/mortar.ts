@@ -7,18 +7,27 @@ import {
 } from './constants.js';
 
 // ─── Weapons ───────────────────────────────────────────────
-// The fort fields two weapons and a pilot carries one of them at a time: the
-// long-ranged FPV quad you fly yourself, and a tube mortar laid on the courtyard
-// pad that lobs shells across the middle of the field.
+// The fort fields six stations and a pilot mans one of them at a time: the
+// long-ranged FPV quad you fly yourself, a tube mortar laid on the courtyard pad
+// that lobs shells across the middle of the field, and the four heavy machine guns
+// bolted to the crest of the berm - one per face, numbered clockwise from the north.
 export enum WeaponType {
   FPV = 'fpv',
   MORTAR = 'mortar',
+  HMG_1 = 'hmg1',
+  HMG_2 = 'hmg2',
+  HMG_3 = 'hmg3',
+  HMG_4 = 'hmg4',
 }
 
 /** Labels the HUD prints next to each weapon slot. */
 export const WEAPON_LABELS: Record<WeaponType, string> = {
   [WeaponType.FPV]: 'FPV DRONE',
   [WeaponType.MORTAR]: 'MORTAR',
+  [WeaponType.HMG_1]: 'HMG · NORTH FACE',
+  [WeaponType.HMG_2]: 'HMG · EAST FACE',
+  [WeaponType.HMG_3]: 'HMG · SOUTH FACE',
+  [WeaponType.HMG_4]: 'HMG · WEST FACE',
 };
 
 // ─── Mortar ballistics ─────────────────────────────────────

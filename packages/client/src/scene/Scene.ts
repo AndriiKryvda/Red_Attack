@@ -3,6 +3,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import {
   GameState, EnemyType, PlayerState, ServerEvent, WeaponType,
   clampMortarTarget, MORTAR_POSITION, MORTAR_MUZZLE_HEIGHT,
+  hmgGunOf, hmgSeat, hmgDirection,
 } from '@red-attack/shared';
 import { createTerrain } from './Terrain';
 import { createOutpost } from './Outpost';
@@ -12,6 +13,8 @@ import { EffectsManager } from './Effects';
 import { StructureRenderer } from './Structures';
 import { MortarView } from './Mortar';
 import { MortarFx } from './MortarFx';
+import { HmgView } from './Hmg';
+import { HmgFx } from './HmgFx';
 
 export class GameScene {
   private renderer: THREE.WebGLRenderer;
@@ -23,6 +26,14 @@ export class GameScene {
   private structureRenderer: StructureRenderer;
   private mortar: MortarView;
   private mortarFx: MortarFx;
+  private hmg: HmgView;
+  private hmgFx: HmgFx;
+  /** Where the local gunner is laying his gun, from his own mouse this frame. */
+  private hmgAim = { yaw: 0, pitch: 0 };
+  /** Scratch vector for the camera kick, so the frame loop does not allocate. */
+  private readonly _shake = new THREE.Vector3();
+  /** Field of view currently set, so it is only rebuilt when it actually changes. */
+  private fov: number = 70;
   /** Where the tube is currently laid, already clamped inside the ring of fire. */
   private mortarAim = clampMortarTarget(0, 0);
   private clock: THREE.Clock;
@@ -106,6 +117,14 @@ export class GameScene {
       (x, y, z, color) => this.effects.spawnTrailPuff(x, y, z, color),
     );
 
+    // The four machine guns: the guns themselves, and the burst layer that draws
+    // every round the server says left a barrel.
+    this.hmg = new HmgView(this.scene);
+    this.hmgFx = new HmgFx(
+      this.scene,
+      (x, y, z, color) => this.effects.spawnTrailPuff(x, y, z, color),
+    );
+
     this.clock = new THREE.Clock();
 
     window.addEventListener('resize', () => this.onResize());
@@ -156,6 +175,14 @@ export class GameScene {
           MORTAR_POSITION.x, MORTAR_MUZZLE_HEIGHT + 0.4, MORTAR_POSITION.z, 0.3,
         );
         this.mortarFx.spawnShell(ev);
+      } else if (ev.type === 'hmg_shot') {
+        // A round left a barrel somewhere. Every client draws it; only the man at
+        // that gun feels it, so the kick goes on the model and in the camera.
+        this.hmgFx.spawnShot(ev);
+        if (ev.ownerId === this.localPlayerId) {
+          this.hmg.kick(ev.gun);
+          this.hmgFx.addShake(0.05);
+        }
       } else if (ev.type === 'enemy_killed') {
         // A destroyed vehicle leaves a burning wreck on the field. Foot troops
         // have no hull to burn, so the call simply ignores them.
@@ -207,9 +234,23 @@ export class GameScene {
     this.mortar.update(_dt);
     this.mortarFx.update(_dt, this.localPlayerId);
 
+    // ─── Machine gun stations ──────────────────────────────
+    // Every gun on the field follows the lay its own crew is holding. Ours comes
+    // from our own mouse and not from the server's copy of it, so the barrel we aim
+    // with is the one we moved this frame and not one tick behind it.
+    const manningGun = (me && !piloting) ? hmgGunOf(me.weapon) : -1;
+    for (const p of state.players) {
+      if (p.manningGun < 0) continue;
+      if (p.id === this.localPlayerId) this.hmg.aim(p.manningGun, this.hmgAim.yaw, this.hmgAim.pitch);
+      else this.hmg.aim(p.manningGun, p.hmgYaw, p.hmgPitch);
+    }
+    this.hmg.update(_dt);
+    this.hmgFx.update(_dt);
+
     // Camera logic. Watching our own shell come down outranks the crash-cam: it is
     // the thing the pilot just did and is the reason the view left the fort.
     const mortarCam = this.mortarFx.cameraShot(this.localPlayerId);
+    this.setFov(manningGun >= 0 ? 55 : 70);
     if (piloting && myDrone) {
       // FPV drone camera
       this.camera.position.set(myDrone.position.x, myDrone.position.y, myDrone.position.z);
@@ -219,6 +260,20 @@ export class GameScene {
       const lookY = myDrone.position.y + Math.sin(pitch) * 10;
       const lookZ = myDrone.position.z + Math.cos(yaw) * Math.cos(pitch) * 10;
       this.camera.lookAt(lookX, lookY, lookZ);
+    } else if (manningGun >= 0) {
+      // At the gun: stand behind the spade grips and look down the barrel, with the
+      // kick of the belt shaking the view along with the gun.
+      const seat = hmgSeat(manningGun, this.hmgAim.yaw);
+      const d = hmgDirection(this.hmgAim.yaw, this.hmgAim.pitch);
+      this.hmgFx.shakeOffset(this._shake);
+      this.camera.position.set(
+        seat.x + this._shake.x, seat.y + this._shake.y, seat.z + this._shake.z,
+      );
+      this.camera.lookAt(
+        seat.x + d.x * 40 + this._shake.x,
+        seat.y + d.y * 40 + this._shake.y,
+        seat.z + d.z * 40 + this._shake.z,
+      );
     } else if (mortarCam) {
       // Side-on tracking of the shell, then a beat held on the crater it makes.
       this.camera.position.copy(mortarCam.pos);
@@ -267,6 +322,23 @@ export class GameScene {
   /** The spot the crew is laid on right now, already inside the ring of fire. */
   getMortarAim(): { x: number; z: number } {
     return { x: this.mortarAim.x, z: this.mortarAim.z };
+  }
+
+  /**
+   * The lay the local gunner is holding this frame, handed over before the update so
+   * the gun, the camera and the shot effects all agree on where the barrel points.
+   */
+  setHmgAim(yaw: number, pitch: number) {
+    this.hmgAim.yaw = yaw;
+    this.hmgAim.pitch = pitch;
+  }
+
+  /** Narrow the view down to the gun optic, widen it back out everywhere else. */
+  private setFov(fov: number) {
+    if (this.fov === fov) return;
+    this.fov = fov;
+    this.camera.fov = fov;
+    this.camera.updateProjectionMatrix();
   }
 
   render() {

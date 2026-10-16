@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { FORT_PERIMETER, MORTAR_POSITION } from '@red-attack/shared';
+import { FORT_PERIMETER, MORTAR_POSITION, HMG_NESTS } from '@red-attack/shared';
 import { standardMaterial, getMaps } from './Textures';
 
 // The fort flies the Ukrainian national flag: blue over yellow. Painted on a
@@ -309,10 +309,10 @@ export function createOutpost(): THREE.Group {
   // wall looks out over. Each is laid a few degrees off square so the four do not
   // read as one copy-pasted model. The south gun stands west of the gate: the gap
   // in the middle of that face is where the vehicles drive through.
-  hmgNest(group, mats, links, 0, -HALF, Math.PI + 0.16);
-  hmgNest(group, mats, links, HALF, 0, Math.PI / 2 - 0.1);
-  hmgNest(group, mats, links, -6.5, HALF, 0.12);
-  hmgNest(group, mats, links, -HALF, 0, -Math.PI / 2 + 0.08);
+  //
+  // What is built here is the nest the crew works from - deck, pedestal, cans and
+  // belts. The gun that turns and fires on it is a live weapon and lives in Hmg.ts.
+  for (const nest of HMG_NESTS) hmgNest(group, mats, links, nest.x, nest.z, nest.yaw);
 
   flushSandbags(group, bags, mats.bag);
   flushBeltLinks(group, links);
@@ -605,14 +605,14 @@ function flushBeltLinks(group: THREE.Group, links: BeltLink[]) {
 }
 
 /**
- * A heavy machine gun nest on the crest of one face of the berm: a timber deck,
- * the gun on a pintle pedestal, an ammo can beside it and two belts of linked
- * rounds - one running from the can up into the feed tray, one coiled on the deck
- * ready to be hooked on.
+ * A heavy machine gun nest on the crest of one face of the berm: a timber deck, a
+ * pintle pedestal to mount the gun on, an ammo can beside it and two belts of
+ * linked rounds - one running from the can up to the feed tray, one coiled on the
+ * deck ready to be hooked on.
  *
- * The gun is built facing its own local +Z and then turned out over the ground its
- * own wall looks over. Like everything else here it is scenery and no collision
- * volume: the weapons that fire are the quad and the tube.
+ * The nest is turned out over the ground its own wall looks over. Like everything
+ * else here it is scenery and no collision volume; the gun that actually aims and
+ * fires is built and animated in Hmg.ts on top of this pedestal.
  */
 function hmgNest(
   group: THREE.Group, mats: FortMats, links: BeltLink[],
@@ -648,43 +648,17 @@ function hmgNest(
     addBox(g, dark, 0.09, 0.3, 0.36, sx, 1.02, 0);
   }
 
-  // The gun: receiver and bolt, spade grips at the back, and a heavy barrel with
-  // cooling rings, a muzzle brake and a sight at each end.
-  addBox(g, gunMetal, 0.17, 0.21, 0.72, 0, 1.12, 0.02);
-  addBox(g, dark, 0.13, 0.1, 0.34, 0, 1.26, -0.06);
-  addBox(g, dark, 0.3, 0.2, 0.08, 0, 1.12, -0.4);
-  for (const sx of [-0.17, 0.17]) {
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.24, 8), dark);
-    grip.position.set(sx, 1.16, -0.56);
-    grip.rotation.x = 0.5;
-    grip.castShadow = true;
-    g.add(grip);
-  }
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 1.05, 12), gunMetal);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 1.16, 0.9);
-  barrel.castShadow = true;
-  g.add(barrel);
-  for (let i = 0; i < 5; i++) {
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.03, 12), dark);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, 1.16, 0.55 + i * 0.16);
-    g.add(ring);
-  }
-  const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.22, 12), gunMetal);
-  brake.rotation.x = Math.PI / 2;
-  brake.position.set(0, 1.16, 1.5);
-  brake.castShadow = true;
-  g.add(brake);
-  addBox(g, dark, 0.03, 0.11, 0.03, 0, 1.28, 1.32);
-  addBox(g, dark, 0.1, 0.1, 0.05, 0, 1.36, 0.12);
+  // The gun itself is not built here: it turns, elevates and recoils, so it lives
+  // with the live weapon in Hmg.ts and is bolted onto this pedestal at the same
+  // trunnion height.
 
   // Ammo can on the deck to the gun's right, its lid left a touch ajar.
   addBox(g, olive, 0.52, 0.34, 0.36, 0.58, 0.17, -0.3);
   addBox(g, dark, 0.54, 0.05, 0.38, 0.58, 0.36, -0.32, 0.06);
 
-  // Belt one: out of the can, across the deck and up the left of the pedestal
-  // into the feed tray.
+  // Belt one: out of the can, across the deck and up the left of the pedestal to
+  // the feed tray. It stops at the yoke rather than at the receiver, because the
+  // gun turns and the belt does not.
   const m = new THREE.Matrix4().makeRotationY(yaw).setPosition(x, CREST_Y + 0.14, z);
   beltRun(links, m, [
     new THREE.Vector3(0.5, 0.4, -0.3),
@@ -692,8 +666,8 @@ function hmgNest(
     new THREE.Vector3(-0.05, 0.12, 0.2),
     new THREE.Vector3(-0.34, 0.42, 0.26),
     new THREE.Vector3(-0.4, 0.84, 0.16),
-    new THREE.Vector3(-0.3, 1.04, 0.16),
-    new THREE.Vector3(-0.1, 1.13, 0.02),
+    new THREE.Vector3(-0.3, 1.0, 0.16),
+    new THREE.Vector3(-0.24, 1.06, 0.06),
   ], 26);
 
   // Belt two: the spare, coiled flat on the deck where a loader can grab it.

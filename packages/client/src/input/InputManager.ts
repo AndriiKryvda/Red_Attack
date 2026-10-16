@@ -1,4 +1,4 @@
-import { WeaponType } from '@red-attack/shared';
+import { WeaponType, clampHmgPitch } from '@red-attack/shared';
 
 export interface InputState {
   forward: number;
@@ -7,6 +7,26 @@ export interface InputState {
   up: number;
   boost: boolean;
 }
+
+/**
+ * The lay of a manned machine gun and whether the trigger is held, sent to the
+ * server every frame the way drone input is. The server owns the belt, the rate of
+ * fire and the hits; this only says where the gun is pointed and that a hand is on
+ * the grips.
+ */
+export interface HmgAim {
+  yaw: number;
+  pitch: number;
+  firing: boolean;
+}
+
+/** Keys that man one of the four machine guns, in the order the HUD numbers them. */
+const HMG_KEYS: Record<string, WeaponType> = {
+  Digit3: WeaponType.HMG_1, Numpad3: WeaponType.HMG_1,
+  Digit4: WeaponType.HMG_2, Numpad4: WeaponType.HMG_2,
+  Digit5: WeaponType.HMG_3, Numpad5: WeaponType.HMG_3,
+  Digit6: WeaponType.HMG_4, Numpad6: WeaponType.HMG_4,
+};
 
 export class InputManager {
   private keys: Set<string> = new Set();
@@ -46,6 +66,16 @@ export class InputManager {
   // Fort view yaw (absolute, for camera when not piloting)
   private fortYaw: number = 0;
 
+  // ─── Machine gun station ───────────────────────────────────
+  // On a gun the mouse stops looking around the fort and starts laying the weapon:
+  // the lay belongs to the gun, it is clamped to what the pintle allows, and the
+  // trigger is held down for as long as the belt is meant to run.
+  private hmgMode: boolean = false;
+  private hmgYaw: number = 0;
+  private hmgPitch: number = 0;
+  /** Space or the left button, for as long as it is held. */
+  private trigger: boolean = false;
+
   private readonly KEYBOARD_YAW_RATE = 2.5; // radians/sec for A/D turning
   private readonly KEYBOARD_PITCH_RATE = 1.5; // radians/sec for Arrow / Q-E tilting
   private readonly MAX_PITCH = Math.PI / 2.2; // nose up/down limit (~82°)
@@ -70,7 +100,11 @@ export class InputManager {
       this.keys.add(e.code);
       if (e.code === 'Space') {
         e.preventDefault();
-        if (this.onLaunch) this.onLaunch();
+        // On a machine gun the trigger is held rather than pressed: the belt and the
+        // cyclic rate are the server's business, so a keydown must not fire once per
+        // auto-repeat.
+        this.trigger = true;
+        if (!this.hmgMode && this.onLaunch) this.onLaunch();
       }
       if (e.code === 'KeyR') {
         if (this.onSelfDestruct) this.onSelfDestruct();
@@ -86,6 +120,12 @@ export class InputManager {
         e.preventDefault();
         if (this.onSelectWeapon) this.onSelectWeapon(WeaponType.MORTAR);
       }
+      // 3 to 6 man one of the four machine guns.
+      const hmg = HMG_KEYS[e.code];
+      if (hmg !== undefined) {
+        e.preventDefault();
+        if (this.onSelectWeapon) this.onSelectWeapon(hmg);
+      }
       if (e.code === 'Tab') {
         e.preventDefault(); // otherwise Tab walks the keyboard focus off the canvas
         if (this.onCycleWeapon) this.onCycleWeapon();
@@ -97,24 +137,37 @@ export class InputManager {
 
     document.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
+      if (e.code === 'Space') this.trigger = false;
     });
 
     document.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       this.mouseDown = true;
+      this.trigger = true;
       // Left click is the mortar's trigger as well as the drone's boost. It only
       // counts once the mouse is captured, so the click that re-captures it (or a
       // click on the menu before the game starts) cannot send a shell by accident.
-      if (this.pointerLocked && this.onFireMouse) this.onFireMouse();
+      // On a machine gun there is nothing to fire: the held trigger says it instead.
+      if (this.pointerLocked && !this.hmgMode && this.onFireMouse) this.onFireMouse();
     });
 
     document.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
+      if (e.button === 0) {
+        this.mouseDown = false;
+        this.trigger = false;
+      }
     });
 
     document.addEventListener('mousemove', (e) => {
       if (!this.pointerLocked) return;
       const sensitivity = 0.002;
+      // On a gun the mouse lays the weapon instead of looking past it: the lay is
+      // the gun's own, and its elevation stops where the pintle stops.
+      if (this.hmgMode) {
+        this.hmgYaw -= e.movementX * sensitivity;
+        this.hmgPitch = clampHmgPitch(this.hmgPitch - e.movementY * sensitivity);
+        return;
+      }
       // Mouse X contributes to yaw delta (incremental rotation)
       this.pendingYawDelta -= e.movementX * sensitivity;
       this.fortYaw -= e.movementX * sensitivity;
@@ -254,6 +307,7 @@ export class InputManager {
   private handleDeactivated() {
     this.keys.clear();
     this.mouseDown = false;
+    this.trigger = false;
     this.pendingYawDelta = 0;
   }
 
@@ -277,6 +331,41 @@ export class InputManager {
   getYaw(): number { return this.fortYaw; }
   getPitch(): number { return this.pitch; }
 
+  /**
+   * Step onto a machine gun or leave it. The trigger is always released by the change
+   * of station: a belt must never keep running because a pilot walked off the gun.
+   */
+  setHmgMode(on: boolean) {
+    if (on === this.hmgMode) return;
+    this.hmgMode = on;
+    this.trigger = false;
+  }
+
+  /**
+   * Put a gun back on the bearing its crew was left holding, as when a pilot walks
+   * over and mans a nest or swaps between two of them.
+   */
+  resetHmgAim(yaw: number) {
+    this.hmgYaw = yaw;
+    this.hmgPitch = 0;
+  }
+
+  get inHmgMode(): boolean { return this.hmgMode; }
+
+  /** The lay the gunner is holding, and whether his hand is on the trigger. */
+  getHmgAim(): HmgAim {
+    return { yaw: this.hmgYaw, pitch: this.hmgPitch, firing: this.trigger };
+  }
+
+  /**
+   * Kick the lay the way a round does: the muzzle climbs and wanders a little to one
+   * side, so walking a burst onto a running soldier stays a job for the gunner.
+   */
+  addHmgRecoil() {
+    this.hmgPitch = clampHmgPitch(this.hmgPitch + 0.006);
+    this.hmgYaw += (Math.random() * 2 - 1) * 0.003;
+  }
+
   getState(): InputState {
     let forward = 0;
     let up = 0;
@@ -299,7 +388,13 @@ export class InputManager {
     let pitchDir = 0;
     if (this.keys.has('ArrowUp') || this.keys.has('KeyQ')) pitchDir += 1;
     if (this.keys.has('ArrowDown') || this.keys.has('KeyE')) pitchDir -= 1;
-    if (pitchDir !== 0) {
+    if (this.hmgMode) {
+      // The same keys lay the gun instead of tilting a view: A/D traverse, arrows
+      // elevate, and the pintle decides how far up or down the gun will go.
+      if (this.keys.has('KeyA')) this.hmgYaw += this.KEYBOARD_YAW_RATE * dt;
+      if (this.keys.has('KeyD')) this.hmgYaw -= this.KEYBOARD_YAW_RATE * dt;
+      if (pitchDir !== 0) this.hmgPitch = clampHmgPitch(this.hmgPitch + pitchDir * this.KEYBOARD_PITCH_RATE * dt);
+    } else if (pitchDir !== 0) {
       this.pitch += pitchDir * this.KEYBOARD_PITCH_RATE * dt;
       this.pitch = Math.max(-this.MAX_PITCH, Math.min(this.MAX_PITCH, this.pitch));
     }

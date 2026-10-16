@@ -100,6 +100,19 @@ export interface PlayerData {
   weapon: WeaponType;
   /** Timestamp the mortar crew needs before it can fire again. */
   mortarReadyAt: number;
+  /** Rounds left in each of the four machine guns, index for index with HMG_NESTS. */
+  hmgAmmo: number[];
+  /**
+   * Timestamp each gun's belt is back to full, or 0 when it is already full. The
+   * crew reloads a gun by not firing it for HMG_RELOAD_TIME seconds, so this is
+   * simply the last shot plus that long, and the HUD counts the rest off it.
+   */
+  hmgReloadAt: number[];
+  /** Nest this pilot is manning right now, or -1 when they are on another weapon. */
+  manningGun: number;
+  /** Lay of the gun the pilot is manning: world yaw, and elevation inside its limits. */
+  hmgYaw: number;
+  hmgPitch: number;
 }
 
 // ─── Horde ───────────────────────────────────────────
@@ -164,6 +177,23 @@ export interface MortarFireMsg {
   z: number;
 }
 
+/**
+ * The lay of a manned machine gun and whether the trigger is under. The client
+ * streams this the way it streams drone input and the server decides when a round
+ * actually leaves the barrel, so the belt, the cyclic rate and the hits stay
+ * authoritative no matter how fast a browser sends frames.
+ */
+export interface HmgInputMsg {
+  type: 'hmg_input';
+  /** Nest index, index for index with HMG_NESTS. */
+  gun: number;
+  /** World yaw of the lay, radians. */
+  yaw: number;
+  /** Elevation in radians; the server clamps it to what the pintle allows. */
+  pitch: number;
+  firing: boolean;
+}
+
 export type ClientMessage =
   | LaunchDroneMsg
   | DroneInputMsg
@@ -171,7 +201,8 @@ export type ClientMessage =
   | PlayerReadyMsg
   | PlayerNameMsg
   | SelectWeaponMsg
-  | MortarFireMsg;
+  | MortarFireMsg
+  | HmgInputMsg;
 
 // ─── Server → Client Events ───────────────────────────────
 export interface ExplosionEvent {
@@ -198,6 +229,27 @@ export interface MortarFireEvent {
   /** Seconds from the muzzle down to `impact`. */
   flight: number;
   impact: Vec3;
+}
+
+/**
+ * One round left a machine gun. The server has already decided whether it hit, so
+ * the event carries the ray the round flew down and how far it was worth: clients
+ * draw a tracer to that distance, with a strike on the ground or on the enemy that
+ * took it.
+ */
+export interface HmgShotEvent {
+  type: 'hmg_shot';
+  /** Nest index the round came out of, index for index with HMG_NESTS. */
+  gun: number;
+  ownerId: string;
+  /** Muzzle in world space, laid the way the gun was laid. */
+  origin: Vec3;
+  /** Unit direction the round flew, spread already in it. */
+  dir: Vec3;
+  /** Metres the tracer runs: to the target, or out to the gun's effective range. */
+  range: number;
+  /** True when a living thing took the round (never a tank, never a building). */
+  hit: boolean;
 }
 
 export interface EnemyKilledEvent {
@@ -276,6 +328,7 @@ export interface GameOverEvent {
 export type ServerEvent =
   | ExplosionEvent
   | MortarFireEvent
+  | HmgShotEvent
   | EnemyKilledEvent
   | EnemyHitEvent
   | StructureHitEvent

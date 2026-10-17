@@ -2,8 +2,13 @@ import * as THREE from 'three';
 import { standardMaterial } from './Textures';
 import { DroneData } from '@red-attack/shared';
 
-// High-contrast per-pilot colours so allied drones stay visible at range.
-const OWNER_PALETTE = [0xff5c5c, 0x4dd2ff, 0xffd166, 0x9b5de5, 0x43d9ad, 0xff9f1c];
+// High-contrast per-pilot colours so allied drones stay visible at range. One
+// colour per seat in a full room (MAX_PLAYERS), spread across the hue wheel so
+// ten quads never read as the same dot in the sky.
+const OWNER_PALETTE = [
+  0xff5c5c, 0x4dd2ff, 0xffd166, 0x9b5de5, 0x43d9ad,
+  0xff9f1c, 0xf72585, 0xf2f5f7, 0xa7e228, 0x3d5afe,
+];
 
 // Visual rotor speed in rad/s. Real 5" props spin far past what a frame budget
 // can draw, so this is slowed down until the blades stay readable.
@@ -14,7 +19,18 @@ const PROP_SPIN = 55;
 const MOTOR_OFFSET = 0.40;
 const PROP_REACH = 0.335;
 
-function colorForOwner(id: string): number {
+/**
+ * The colour a pilot wears: the quad, its callsign tag and its smoke trail all
+ * take it from here. Pilots are coloured by the seat they took in the room —
+ * their place in the player list, which the server builds in join order and
+ * every client therefore numbers the same way — rather than by a hash of their
+ * session id. A hash cannot promise two pilots will differ, and in a ten-man
+ * room two pilots wearing the same colour is the near-certain case.
+ */
+function colorForOwner(id: string, seat?: number): number {
+  if (seat !== undefined && seat >= 0) return OWNER_PALETTE[seat % OWNER_PALETTE.length];
+  // A drone whose owner has already left the player list still gets a stable
+  // colour out of the hash until its mesh is dropped.
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
   return OWNER_PALETTE[Math.abs(h) % OWNER_PALETTE.length];
@@ -52,6 +68,7 @@ export class DroneRenderer {
     drones: DroneData[],
     localOwnerId = '',
     names: Record<string, string> = {},
+    seats: Record<string, number> = {},
     viewPos?: THREE.Vector3,
     onTrail?: (x: number, y: number, z: number, color: number) => void,
   ) {
@@ -65,7 +82,7 @@ export class DroneRenderer {
       const isOwn = drone.ownerId === localOwnerId;
       let vis = this.meshes.get(drone.id);
       if (!vis) {
-        const color = colorForOwner(drone.ownerId);
+        const color = colorForOwner(drone.ownerId, seats[drone.ownerId]);
         const built = this.createDroneMesh(color, isOwn);
         const label = isOwn ? null : this.createLabel(names[drone.ownerId] || 'PILOT', color);
         if (label) built.group.add(label);

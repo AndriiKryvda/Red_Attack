@@ -171,7 +171,7 @@ was worth, which is what every client draws the tracer to.
 
 - **Create Game** — generates a 4-character room code.
 - **Join Game** — enter the room code to join a friend's session.
-- Up to **4 players** per room.
+- Up to **10 players** per room.
 - Each player pilots their own drone independently.
 - Shared outpost HP and horde state.
 - Every pilot sees the other pilots' drones in the air (colour-coded per player, with a callsign tag and a smoke trail).
@@ -196,7 +196,7 @@ was worth, which is what every client draws the tracer to.
 | Door spawns | 75% of the spawns on a built-up side step out of a building doorway |
 | Village | 14 buildings + 12 parked cars, on the north and east edges 126 m out |
 | Wreckage burn | open flame ~14 s, smoke until 55 s, up to 12 piles at once |
-| Max players | 4 |
+| Max players | 10 |
 
 ### Endless Horde
 

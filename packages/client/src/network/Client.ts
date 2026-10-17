@@ -1,5 +1,5 @@
 import { Client, Room } from '@colyseus/sdk';
-import { GameState, ServerEvent, WeaponType } from '@red-attack/shared';
+import { GameState, ServerEvent, WeaponType, MAX_PLAYERS } from '@red-attack/shared';
 
 export class NetworkClient {
   private client: Client;
@@ -53,7 +53,12 @@ export class NetworkClient {
         this.room = null;
       });
     } catch (err: any) {
-      const message = err?.message || 'Failed to connect to server';
+      let message = err?.message || 'Failed to connect to server';
+      // A room that already holds MAX_PLAYERS pilots answers a join with Colyseus's
+      // own "room is locked", which means nothing to a pilot holding a room code.
+      if (/is locked|is full|not joinable/i.test(message)) {
+        message = `That room is full — ${MAX_PLAYERS} pilots maximum`;
+      }
       console.error('[Net] Failed to join:', message);
       throw new Error(message);
     }

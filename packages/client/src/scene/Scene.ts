@@ -152,13 +152,21 @@ export class GameScene {
     );
 
     // Update drones. Remote drones get a per-pilot colour, a callsign tag and a
-    // smoke trail so every pilot can see the others in the sky.
+    // smoke trail so every pilot can see the others in the sky. The colour is
+    // picked by the seat each pilot took in the room: the server builds the
+    // player list in join order, so every client numbers the crew alike and a
+    // full ten-man room never dresses two pilots in the same colour.
     const names: Record<string, string> = {};
-    for (const p of state.players) names[p.id] = p.name;
+    const seats: Record<string, number> = {};
+    state.players.forEach((p, i) => {
+      names[p.id] = p.name;
+      seats[p.id] = i;
+    });
     this.droneRenderer.sync(
       state.drones,
       this.localPlayerId,
       names,
+      seats,
       this.camera.position,
       (x, y, z, color) => this.effects.spawnTrailPuff(x, y, z, color),
     );
@@ -241,6 +249,10 @@ export class GameScene {
     const manningGun = (me && !piloting) ? hmgGunOf(me.weapon) : -1;
     for (const p of state.players) {
       if (p.manningGun < 0) continue;
+      // A crew of ten has more pilots than nests, so two of them can stand at the
+      // same gun with a belt each. My screen draws my own lay on the gun I hold:
+      // a remote crew sharing it never gets to swing the barrel I am aiming with.
+      if (p.manningGun === manningGun && p.id !== this.localPlayerId) continue;
       if (p.id === this.localPlayerId) this.hmg.aim(p.manningGun, this.hmgAim.yaw, this.hmgAim.pitch);
       else this.hmg.aim(p.manningGun, p.hmgYaw, p.hmgPitch);
     }

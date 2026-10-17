@@ -141,7 +141,14 @@ export const MORTAR_CAM_HOLD = 1;
 
 // ─── Server ────────────────────────────────────────────────
 export const TICK_RATE = 50;             // ms per tick (20 TPS)
-export const MAX_PLAYERS = 4;
+/**
+ * A room holds a full ten-man crew: enough pilots to keep every weapon station
+ * manned at once (the quad, the tube and the four machine guns) with pilots left
+ * over to fly a second and third wave of quads. Colours, the state broadcast and
+ * the horde scaling all stay in step with this number — see OWNER_PALETTE in
+ * packages/client/src/scene/Drone.ts.
+ */
+export const MAX_PLAYERS = 10;
 export const SERVER_PORT = 2567;
 
 // ─── Scoring ───────────────────────────────────────────────

@@ -96,6 +96,13 @@ export class InputManager {
 
   private setupListeners() {
     document.addEventListener('keydown', (e) => {
+      // Ignore keystrokes aimed at a text field (the lobby callsign and room-code inputs):
+      // the game weapon keys must not swallow what a pilot is typing, so digits 1-6 (station
+      // hotkeys) and Space/Tab/arrows reach the field instead of being swallowed here.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
       if (e.repeat) return;
       this.keys.add(e.code);
       if (e.code === 'Space') {

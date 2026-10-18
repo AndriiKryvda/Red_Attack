@@ -248,9 +248,16 @@ export class GameScene {
       this.hadDrone = true;
     }
     if (this.hadDrone && !piloting) {
-      this.deathCamPos.copy(this.lastDronePos);
-      this.deathCamUntil = elapsed + 5;
-      this.effects.spawnCrash(this.deathCamPos.x, this.deathCamPos.y, this.deathCamPos.z);
+      // Only a drone that was shot down crashes: that is the one transition out of
+      // piloting that drops the pilot into COOLDOWN. A Vampire that landed on its pad
+      // and released its pilot leaves PILOTING for WAITING, and that walk back to the
+      // fort is not a wreck worth a crash-cam. Either way the pilot has left the
+      // cockpit, so stop tracking the aircraft.
+      if (me && me.state === PlayerState.COOLDOWN) {
+        this.deathCamPos.copy(this.lastDronePos);
+        this.deathCamUntil = elapsed + 5;
+        this.effects.spawnCrash(this.deathCamPos.x, this.deathCamPos.y, this.deathCamPos.z);
+      }
       this.hadDrone = false;
     }
 

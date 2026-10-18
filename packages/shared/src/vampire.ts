@@ -1,19 +1,41 @@
 import { MORTAR_GRAVITY } from './constants.js';
 
 // ─── Vampire drone-bomber ──────────────────────────────────
-// The Vampire is a pilot-flown bomber: a heavier quad that carries a small stack
-// of mini-bombs under its belly instead of a single shaped charge. You fly it the
-// way you fly the FPV, but you release its bombs over the village rather than
-// steering it into the target. Once the stack is empty it flies itself home, sits
-// on the pad while the crew re-arms it, and hands the controls back for the next
-// run — so one sortie is a loop of drop, drop, drop, home, re-arm, out again.
+// The Vampire is a pilot-flown bomber: a heavier craft that carries a small stack
+// of mini-bombs under its belly instead of a single shaped charge. Like the kamikaze
+// FPV it is flown with the same stick — W/S push it forward or back, A/D and the mouse
+// turn it — and it climbs and descends on the same keys (Space up, Shift down). The one
+// difference is that it works a band of altitudes rather than the whole sky: the pilot
+// flies it between a low ceiling and a high one (see VAMPIRE_MIN/MAX_ALTITUDE), staying
+// above the rooftops at the bottom and under the cap at the top, then releases its bombs
+// over the village. Once the stack is empty it flies itself home, hovers over the pad
+// while the crew re-arms it, and hands the controls back for the next run — so one
+// sortie is a loop of drop, drop, drop, home, re-arm, out again.
 
 /** Mini-bombs the Vampire carries on a sortie. */
 export const VAMPIRE_BOMB_CAPACITY = 5;
 /**
- * Altitude in meters below which the crew refuses to release a bomb. A bomb let go
- * too low has no time to spread its blast and the aircraft is in the danger radius
- * of its own weapon; holding the pilot above this line keeps every drop safe.
+ * The floor of the band the bomber is flown in, meters. It sits above the tallest
+ * building (water tower, 15 m) and the tallest tree (~11 m) on the map, so even at
+ * the bottom of its band a Vampire never clips a rooftop or treetop.
+ */
+export const VAMPIRE_MIN_ALTITUDE = 20;
+/**
+ * The ceiling of the band the bomber is flown in, meters. The pilot climbs toward it
+ * with `Space` and sinks back to the floor with `Shift`; the server clamps the aircraft
+ * between the two so it stays in play and on camera.
+ */
+export const VAMPIRE_MAX_ALTITUDE = 80;
+/**
+ * Vertical speed the bomber climbs or descends at, m/s, when the pilot holds `Space`
+ * or `Shift`. A touch sedate for a heavy aircraft — it flies faster than it climbs.
+ */
+export const VAMPIRE_CLIMB_RATE = 10;
+/**
+ * Altitude in meters below which the crew refuses to release a bomb. The bomber now
+ * always flies above the band floor, which is already above this line, so it is a
+ * safety floor rather than a limit the pilot has to climb to: a bomb let go too low
+ * has no time to spread its blast.
  */
 export const VAMPIRE_MIN_DROP_ALTITUDE = 12;
 /** Seconds the release must wait between two bombs, so a stack cannot be dumped at once. */
@@ -22,10 +44,10 @@ export const VAMPIRE_DROP_INTERVAL = 0.6;
 export const VAMPIRE_RELOAD_TIME = 6;
 /** Cruise speed of the bomber, m/s — a touch slower than the nimble FPV. */
 export const VAMPIRE_SPEED = 13;
-/** Altitude the bomber climbs to and flies home at while on autopilot, meters. */
-export const VAMPIRE_CRUISE_ALTITUDE = 18;
-/** Altitude the bomber is released at off the pad, meters. */
-export const VAMPIRE_LAUNCH_ALTITUDE = 8;
+/** Altitude the empty bomber holds on its autopilot trip home, meters. */
+export const VAMPIRE_CRUISE_ALTITUDE = VAMPIRE_MIN_ALTITUDE;
+/** Altitude the bomber lifts off to and settles back onto the pad at to re-arm, meters. */
+export const VAMPIRE_LAUNCH_ALTITUDE = VAMPIRE_MIN_ALTITUDE;
 /** Damage one mini-bomb deals to everything inside its blast. */
 export const VAMPIRE_BOMB_DAMAGE = 3;
 /** Blast radius of a mini-bomb, meters — a footprint between a quad and a shell. */

@@ -24,6 +24,7 @@ import {
   MORTAR_DAMAGE, MORTAR_BLAST_SCALE,
   VAMPIRE_BOMB_CAPACITY, VAMPIRE_MIN_DROP_ALTITUDE, VAMPIRE_DROP_INTERVAL,
   VAMPIRE_RELOAD_TIME, VAMPIRE_SPEED, VAMPIRE_CRUISE_ALTITUDE, VAMPIRE_LAUNCH_ALTITUDE,
+  VAMPIRE_MIN_ALTITUDE, VAMPIRE_MAX_ALTITUDE, VAMPIRE_CLIMB_RATE,
   VAMPIRE_BOMB_DAMAGE, VAMPIRE_BOMB_RADIUS, VAMPIRE_BOMB_BLAST_SCALE,
   VAMPIRE_BASE, VAMPIRE_BASE_RADIUS, vampireBombFlight, vampireBombHeight,
   HMG_NESTS, HMG_BELT_SIZE, HMG_RELOAD_TIME, HMG_ROUNDS_PER_SEC, HMG_DAMAGE,
@@ -772,10 +773,10 @@ export class GameRoom extends Room {
   }
 
   /**
-   * Fly an empty Vampire home on its own. It climbs to the cruise altitude, steers
-   * level at the pad, settles down onto it, and sits there while the crew re-arms it;
-   * when the re-arm timer runs out the stack is full again and the pilot gets the
-   * controls back. The pilot's input is ignored for the whole trip (see tickDrones).
+   * Fly an empty Vampire home on its own. It holds the station altitude, steers
+   * level at the pad, hovers there while the crew re-arms it; when the re-arm timer
+   * runs out the stack is full again and the pilot gets the controls back. The
+   * pilot's input is ignored for the whole trip (see tickDrones).
    */
   private tickVampireReturn(drone: InternalDrone, dt: number) {
     const dx = VAMPIRE_BASE.x - drone.position.x;
@@ -816,15 +817,21 @@ export class GameRoom extends Room {
     }
   }
 
-  /** Hand a re-armed Vampire back to its pilot with a full stack of mini-bombs. */
+  /**
+   * A Vampire that has come home and finished re-arming is handed back to its pilot
+   * with a full stack of mini-bombs, and the pilot steps out of the cockpit back onto
+   * the fort: the airframe is parked (despawned), so the next launch lifts a fresh
+   * bomber. Releasing the pilot here is what lets him switch to the FPV, the tube, or
+   * a machine gun once his bomber is reloaded on the pad.
+   */
   private reloadVampire(drone: InternalDrone) {
-    drone.vampireBombs = VAMPIRE_BOMB_CAPACITY;
-    drone.returning = false;
-    drone.lastDropAt = 0;
-    drone.vampireReloadAt = 0;
+    drone.alive = false;
+    this.drones.delete(drone.id);
     const player = this.players.get(drone.ownerId);
     if (player) {
-      player.vampireBombs = VAMPIRE_BOMB_CAPACITY;
+      player.state = PlayerState.WAITING;
+      player.droneId = null;
+      player.vampireBombs = 0;
       player.vampireReturning = false;
       player.vampireReloadAt = 0;
     }
@@ -954,9 +961,30 @@ export class GameRoom extends Room {
         continue;
       }
 
+      // A Vampire is flown like the FPV — it turns (yaw), moves forward/back, and
+      // climbs or descends on the same keys (Space up, Shift down) — but it works a
+      // band of altitudes rather than the whole sky: the server clamps it between the
+      // floor (above every rooftop) and the ceiling so it stays in play and on camera.
+      if (drone.kind === 'vampire') {
+        const input = drone.input;
+        const speed = VAMPIRE_SPEED * (input.boost && this.serverTime > drone.boostCooldownUntil ? DRONE_BOOST_MULTIPLIER : 1);
+        const yaw = drone.yaw;
+        drone.pitch = 0;
+        drone.velocity.x = Math.sin(yaw) * input.forward * speed;
+        drone.velocity.y = input.up * VAMPIRE_CLIMB_RATE;
+        drone.velocity.z = Math.cos(yaw) * input.forward * speed;
+        drone.position.x += drone.velocity.x * dt;
+        drone.position.y += drone.velocity.y * dt;
+        drone.position.z += drone.velocity.z * dt;
+        if (drone.position.y < VAMPIRE_MIN_ALTITUDE) drone.position.y = VAMPIRE_MIN_ALTITUDE;
+        else if (drone.position.y > VAMPIRE_MAX_ALTITUDE) drone.position.y = VAMPIRE_MAX_ALTITUDE;
+        this.checkDroneCollisions(drone);
+        continue;
+      }
+
       const input = drone.input;
-      const baseSpeed = drone.kind === 'vampire' ? VAMPIRE_SPEED : DRONE_SPEED;
-      const speed = baseSpeed * (input.boost && this.serverTime > drone.boostCooldownUntil ? DRONE_BOOST_MULTIPLIER : 1);
+      // Only the FPV kamikaze quad reaches here; Vampires were handled above.
+      const speed = DRONE_SPEED * (input.boost && this.serverTime > drone.boostCooldownUntil ? DRONE_BOOST_MULTIPLIER : 1);
       const yaw = drone.yaw;
       const pitch = drone.pitch;
 
@@ -1213,10 +1241,11 @@ export class GameRoom extends Room {
   }
 
   /**
-   * Send a Vampire bomber up off the pad with a full stack of mini-bombs. It lifts
-   * to a safe launch altitude so the first drop is legal the moment the pilot climbs
-   * a touch more, and the bomb state is mirrored onto the player so the HUD can read
-   * the stack without reaching through the drone.
+   * Send a Vampire bomber up off the pad with a full stack of mini-bombs. It lifts to
+   * the floor of its altitude band, which is already above the drop floor, so the first
+   * bomb is legal the instant the pilot is airborne; from there the pilot climbs or
+   * descends within the band. The bomb state is mirrored onto the player so the HUD can
+   * read the stack without reaching through the drone.
    */
   private launchVampire(player: InternalPlayer) {
     const drone: InternalDrone = {

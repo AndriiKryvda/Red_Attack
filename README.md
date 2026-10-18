@@ -169,7 +169,7 @@ was worth, which is what every client draws the tracer to.
 
 ## Multiplayer
 
-- **Create Game** — generates a 4-character room code.
+- **Create Game** — generates a 4-digit numeric room code (digits only, no letters).
 - **Join Game** — enter the room code to join a friend's session.
 - Up to **10 players** per room.
 - Each player pilots their own drone independently.

@@ -960,7 +960,7 @@ export class GameRoom extends Room {
   }
 
   private generateRoomCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const chars = '0123456789';
     let code = '';
     do {
       code = '';

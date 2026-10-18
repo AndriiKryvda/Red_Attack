@@ -2,6 +2,7 @@ import { GameScene } from './scene/Scene';
 import { NetworkClient } from './network/Client';
 import { InputManager } from './input/InputManager';
 import { HUD } from './ui/HUD';
+import { audio } from './audio/AudioManager';
 import {
   ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS, WeaponType, PlayerState,
   HMG_NESTS, HMG_WEAPONS, hmgGunOf, Difficulty,
@@ -121,10 +122,20 @@ input.onLockHintChange = (show) => {
   lockHint?.classList.toggle('hidden', !show);
 };
 
+// M mutes the whole game — gunfire, engines and the horde's battle cries alike.
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyM' || e.repeat) return;
+  const muted = audio.toggleMute();
+  hud.showAnnouncement(muted ? '🔇 SOUND OFF' : '🔊 SOUND ON');
+});
+
 // "Create Game" button
 btnStart.addEventListener('click', async () => {
   if (gameStarted) return;
   gameStarted = true;
+  // The browser only lets a page make noise after its pilot clicks something,
+  // and this click is that something: the audio world is built right here.
+  audio.init();
   const name = nameInput.value.trim() || 'Pilot';
   const difficulty = (difficultySelect?.value as Difficulty) || Difficulty.EASY;
   overlay.classList.add('hidden');
@@ -178,6 +189,7 @@ btnJoin.addEventListener('click', async () => {
   const code = roomCodeInput.value.trim().toUpperCase();
   if (!code) { if (errorMsg) errorMsg.textContent = 'Enter a room code'; return; }
   gameStarted = true;
+  audio.init(); // same gesture rule as the Create Game button
   const name = nameInput.value.trim() || 'Pilot';
   overlay.classList.add('hidden');
   try {

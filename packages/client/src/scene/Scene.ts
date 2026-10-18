@@ -15,6 +15,7 @@ import { MortarView } from './Mortar';
 import { MortarFx } from './MortarFx';
 import { HmgView } from './Hmg';
 import { HmgFx } from './HmgFx';
+import { audio } from '../audio/AudioManager';
 
 export class GameScene {
   private renderer: THREE.WebGLRenderer;
@@ -115,6 +116,7 @@ export class GameScene {
     this.mortarFx = new MortarFx(
       this.scene,
       (x, y, z, color) => this.effects.spawnTrailPuff(x, y, z, color),
+      (shellId, flight) => audio.startWhistle(shellId, flight),
     );
 
     // The four machine guns: the guns themselves, and the burst layer that draws
@@ -126,6 +128,10 @@ export class GameScene {
     );
 
     this.clock = new THREE.Clock();
+
+    // The fort is one of the player's two ears for the horde's battle cries;
+    // the audio layer only needs to know where it stands, once.
+    audio.setFortPos(this.FORT_POS);
 
     window.addEventListener('resize', () => this.onResize());
   }
@@ -175,6 +181,7 @@ export class GameScene {
     for (const ev of events) {
       if (ev.type === 'explosion') {
         this.effects.spawnExplosion(ev.position.x, ev.position.y, ev.position.z, ev.scale ?? 1);
+        audio.explosion(ev.position.x, ev.position.y, ev.position.z, ev.scale ?? 1);
       } else if (ev.type === 'mortar_fire') {
         // A shell left the tube: kick the model, throw a blast at the muzzle and
         // hand the shell to the flight layer, which also drives the camera.
@@ -182,11 +189,13 @@ export class GameScene {
         this.effects.spawnExplosion(
           MORTAR_POSITION.x, MORTAR_MUZZLE_HEIGHT + 0.4, MORTAR_POSITION.z, 0.3,
         );
+        audio.mortarLaunch(MORTAR_POSITION.x, MORTAR_MUZZLE_HEIGHT, MORTAR_POSITION.z);
         this.mortarFx.spawnShell(ev);
       } else if (ev.type === 'hmg_shot') {
         // A round left a barrel somewhere. Every client draws it; only the man at
         // that gun feels it, so the kick goes on the model and in the camera.
         this.hmgFx.spawnShot(ev);
+        audio.hmgShot(ev.origin.x, ev.origin.y, ev.origin.z, ev.ownerId === this.localPlayerId);
         if (ev.ownerId === this.localPlayerId) {
           this.hmg.kick(ev.gun);
           this.hmgFx.addShake(0.05);
@@ -195,14 +204,19 @@ export class GameScene {
         // A destroyed vehicle leaves a burning wreck on the field. Foot troops
         // have no hull to burn, so the call simply ignores them.
         this.effects.spawnBurningWreck(ev.enemyType, ev.position.x, ev.position.z);
+        audio.enemyKilled(ev.enemyType, ev.position.x, ev.position.y, ev.position.z);
       } else if (ev.type === 'enemy_breach') {
         // An enemy slipped through at the wall: mark it with a red puff so the
         // breach is visible without ending anything.
         this.effects.spawnTrailPuff(ev.position.x, ev.position.y + 0.8, ev.position.z, 0xff3b30);
+        audio.breachAlarm();
       } else if (ev.type === 'structure_destroyed') {
         // A building coming down is a bigger affair than a drone hitting a tank:
         // a full fireball and a smoke column over the rubble.
         this.effects.spawnCrash(ev.position.x, 1.5, ev.position.z);
+        audio.bigCrash(ev.position.x, 1.5, ev.position.z);
+      } else if (ev.type === 'horde_start') {
+        audio.hordeSiren();
       }
     }
 
@@ -310,6 +324,13 @@ export class GameScene {
     // Compass heading: view direction measured clockwise from north (-Z).
     this.camera.getWorldDirection(this._fwd);
     this.heading = Math.atan2(this._fwd.x, -this._fwd.z);
+
+    // Audio: the camera is this frame's ear for the battlefield's sounds, and
+    // the looping layers (tank engines, the quad's own hum) follow it. The
+    // horde's battle cries instead answer to where the player *is*: the fort,
+    // and his drone while he flies it.
+    audio.setListener(this.camera.position);
+    audio.update(_dt, state.enemies, piloting && !!myDrone, myDrone?.position ?? null);
 
     // Update effects
     this.effects.update(_dt);

@@ -19,6 +19,7 @@ red-attack/
 ├── packages/
 │   ├── client/          # Vite + Three.js frontend
 │   │   └── src/
+│   │       ├── audio/       # AudioManager (Web Audio SFX) + BattleCries (ru-RU speech)
 │   │       ├── input/       # InputManager (keyboard + mouse)
 │   │       ├── network/     # Colyseus client wrapper
 │   │       ├── scene/       # Three.js scene, drone, enemies, terrain
@@ -98,6 +99,7 @@ same shell; on a machine gun it is the same held trigger as `Space`.
 | **LMB** | Boost (2× speed); with the tube manned, fires the mortar; on a gun, the held trigger |
 | **R** | Self-destruct drone |
 | **H** | Show / hide the on-screen key guide (remembered between sessions) |
+| **M** | Sound on / off — mutes gunfire, explosions, engines and the horde's battle cries |
 | **Click** | Recapture the mouse after alt-tabbing away or pressing `Esc` |
 
 ### How to Fly
@@ -311,6 +313,37 @@ pile burns with open flame for the first ~14 s, then smokes, cools and fades out
 over the last 4 s and is cleaned up at 55 s. At most 12 wrecks are kept on the
 field; a new kill retires the oldest pile. This is purely a client-side visual —
 it costs no bandwidth and no server state.
+
+## Sound
+
+Every sound in the game is **synthesized live in the browser** — there is not a
+single audio file in the repo, and the game works with the network unplugged.
+The whole layer lives in `packages/client/src/audio/`:
+
+- **`AudioManager.ts`** — a Web Audio graph built lazily on the first menu click
+  (the browser will not let a page make noise before that). Gunfire, explosions,
+  the mortar's thump and the long falling whistle of a shell in the air, the
+  klaxon that goes up when an enemy reaches the wire, the wailing siren that
+  opens the horde, the diesel growl of the nearest tanks and the chest-deep
+  roar of your own quad all come out of oscillators and noise buffers. Each
+  one-shot measures its distance from the camera and scales its volume with a
+  squared falloff, so a hit across the field is a thump and a hit at the wall is
+  a crack. The continuous layers (tank engines, the drone hum) are looping
+  voices whose gain is walked toward its target every frame.
+- **`BattleCries.ts`** — the horde yells. Living enemies within 30 m of one of
+  the player's two ears (the fort, and his drone while he flies it) open their
+  mouths through the browser's own Russian speech synthesis and shout
+  **`Урааааа!`** or **`За Путина!`**. One voice at a time, a global cooldown
+  between shouts and a longer per-enemy cooldown on top, so a horde of forty
+  charges with a steady roll of cries instead of forty throats talking over
+  each other. Pitch and tempo jitter keeps ten soldiers from sounding like one
+  soldier on a loop, and volume follows distance the way every other sound in
+  the game does. No audio files, no network, no voices to ship — just a
+  `ru-RU` voice the browser already has.
+
+Press **`M`** at any time to mute or unmute everything, battle cries included;
+the HUD flashes `🔊 SOUND ON` / `🔇 SOUND OFF` so you know which way you just
+toggled it.
 
 ## Build for Production
 

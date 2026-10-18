@@ -58,6 +58,9 @@ export class MortarFx {
   private readonly markerMat: THREE.MeshBasicMaterial;
   private readonly shells: FlyingShell[] = [];
   private readonly puff: TrailPuff;
+  /** Told a shell left the tube, so its whistle can run the length of the flight. */
+  private readonly onShell?: (shellId: string, flight: number) => void;
+
   /** This layer's own clock, so camera holds do not depend on server time. */
   private clock: number = 0;
   private holdUntil: number = 0;
@@ -66,8 +69,10 @@ export class MortarFx {
   /** Samples drawn along the predicted path. */
   private static readonly ARC_POINTS = 44;
 
-  constructor(scene: THREE.Scene, puff: TrailPuff) {
+  constructor(scene: THREE.Scene, puff: TrailPuff, onShell?: (shellId: string, flight: number) => void) {
     this.puff = puff;
+    this.onShell = onShell;
+
     this.aim = new THREE.Group();
     this.aim.visible = false;
     scene.add(this.aim);
@@ -176,6 +181,7 @@ export class MortarFx {
       ownerId: ev.ownerId,
       puff: 0,
     });
+    this.onShell?.(ev.shellId, Math.max(0.1, ev.flight));
   }
 
   /**

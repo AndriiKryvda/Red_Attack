@@ -132,6 +132,13 @@
       <br/>
       <input type="text" id="room-code" placeholder="Room code (optional)" maxlength="4" inputmode="numeric" pattern="[0-9]*" />
       <br/>
+      <label for="difficulty" style="display:inline-block;color:#bbb;font-size:12px;letter-spacing:2px;vertical-align:middle;margin:10px 8px 28px 0">DIFFICULTY</label>
+      <select id="difficulty" style="display:inline-block;vertical-align:middle;width:140px;padding:10px;font-size:14px;border-radius:6px;border:1px solid #444;background:#222;color:#fff;margin:10px 0 28px">
+        <option value="hard">Hard</option>
+        <option value="medium">Medium</option>
+        <option value="easy" selected>Easy</option>
+      </select>
+      <br/>
       <button id="btn-start">CREATE GAME</button>
       <button id="btn-join" style="margin-left:10px;background:#4caf50">JOIN GAME</button>
       <div id="error-msg" style="color:#ff6b6b;font-size:14px;margin-top:12px;min-height:20px"></div>

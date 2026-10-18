@@ -13,6 +13,7 @@ import {
   HORDE_START_RATE, HORDE_MAX_RATE, HORDE_RAMP_TIME,
   HORDE_SPAWN_BURST_MAX, HORDE_PLAYER_PRESSURE, HORDE_THREAT_INTERVAL,
   HORDE_VICTORY_TIME,
+  Difficulty, DIFFICULTY_MULTIPLIER, DEFAULT_DIFFICULTY,
   HORDE_SPAWN_BORDER, HORDE_SPAWN_RING_MIN, HORDE_SPAWN_RING_MAX,
   StructureKind, SpawnEdge, STRUCTURE_SPECS, BUILDING_VARIANTS, CAR_VARIANTS,
   VILLAGE_EDGE_OFFSET, VILLAGE_SPREAD, VILLAGE_CAR_DEPTH, HORDE_BUILDING_SPAWN_CHANCE,
@@ -96,6 +97,8 @@ export class GameRoom extends Room {
   leaks: number = 0;       // enemies that reached the fort — counted, never fatal
   serverTime: number = 0;
   roomCode: string = '';
+  /** How thick the horde is; set by the host when the room is created. */
+  difficulty: Difficulty = DEFAULT_DIFFICULTY;
 
   enemies: Map<string, InternalEnemy> = new Map();
   drones: Map<string, InternalDrone> = new Map();
@@ -117,6 +120,11 @@ export class GameRoom extends Room {
   onCreate(_options: any) {
     this.autoDispose = true;
     this.maxClients = MAX_PLAYERS;
+    // The host picks a difficulty when creating the room; anything unrecognised
+    // falls back to the full-intensity hard horde.
+    if ((Object.values(Difficulty) as string[]).includes(_options?.difficulty)) {
+      this.difficulty = _options.difficulty as Difficulty;
+    }
     this.setPatchRate(TICK_RATE);
     this.setSimulationInterval(() => this.tick(), TICK_RATE);
     // The village is part of the map, so it has to stand there before the first
@@ -196,7 +204,7 @@ export class GameRoom extends Room {
     this.shells.clear();
     this.buildVillage();
     this.broadcastEvent({ type: 'horde_start' });
-    console.log(`[Horde] Room ${this.roomCode}: endless horde engaged`);
+    console.log(`[Horde] Room ${this.roomCode}: horde engaged — survive ${Math.round(HORDE_VICTORY_TIME / 60)} min to win`);
   }
 
   // ─── Horde escalation ────────────────────────────────────
@@ -208,7 +216,17 @@ export class GameRoom extends Room {
   /** Enemies per second — ramps with time and scales with the crew size. */
   private spawnRate(): number {
     const pressure = 1 + HORDE_PLAYER_PRESSURE * Math.max(0, this.players.size - 1);
-    return (HORDE_START_RATE + (HORDE_MAX_RATE - HORDE_START_RATE) * this.escalation()) * pressure;
+    const base = HORDE_START_RATE + (HORDE_MAX_RATE - HORDE_START_RATE) * this.escalation();
+    return base * pressure * DIFFICULTY_MULTIPLIER[this.difficulty];
+  }
+
+  /**
+   * The most enemies allowed on the field at once, thinned out by the difficulty
+   * so an easy or medium field stays proportionally sparse even late in a run.
+   * Always at least one so the horde never fully stalls.
+   */
+  private activeEnemyCap(): number {
+    return Math.max(1, Math.round(MAX_ACTIVE_ENEMIES * DIFFICULTY_MULTIPLIER[this.difficulty]));
   }
 
   /**
@@ -284,7 +302,7 @@ export class GameRoom extends Room {
 
     let spawned = 0;
     while (this.spawnAccumulator >= 1 && spawned < HORDE_SPAWN_BURST_MAX) {
-      if (this.getActiveEnemyCount() >= MAX_ACTIVE_ENEMIES) {
+      if (this.getActiveEnemyCount() >= this.activeEnemyCap()) {
         // Field is saturated — don't bank up spawns for later.
         this.spawnAccumulator = 0;
         return;
@@ -988,6 +1006,7 @@ export class GameRoom extends Room {
       leaks: this.leaks,
       playerCount: this.players.size,
       roomCode: this.roomCode,
+      difficulty: this.difficulty,
       enemies: Array.from(this.enemies.values()).map(e => ({
         id: e.id, type: e.type, position: e.position,
         hp: e.hp, maxHp: e.maxHp, speed: e.speed,

@@ -1,4 +1,4 @@
-import { EnemyType } from './types.js';
+import { EnemyType, Difficulty } from './types.js';
 
 // ─── Drone ─────────────────────────────────────────────────
 export const DRONE_SPEED = 15;           // m/s
@@ -87,18 +87,40 @@ export const ENEMY_DEATH_LINGER_TIME = 30; // seconds before dead enemies disapp
 // through, it does not get to stroll across the parade ground.
 export const FORT_PERIMETER = 12.5;        // meters from center (the fence line)
 
-// ─── Horde (endless escalating assault) ──────────────────
+// ─── Horde (escalating assault — survive 20 min to win) ─────
 // There are no discrete waves: enemies stream toward the fort continuously and
 // the spawn cadence tightens the longer the fort survives.
-export const MAX_ACTIVE_ENEMIES = 80;        // hard cap of live enemies
+export const MAX_ACTIVE_ENEMIES = 100;       // hard cap of live enemies
 
 export const HORDE_START_RATE = 0.35;        // enemies per second at t = 0 (~1 every 3 s)
-export const HORDE_MAX_RATE = 1.6;           // enemies per second at full escalation
-export const HORDE_RAMP_TIME = 540;          // seconds to reach HORDE_MAX_RATE
+export const HORDE_MAX_RATE = 2.0;           // enemies per second at full escalation
+export const HORDE_RAMP_TIME = 900;          // seconds to reach HORDE_MAX_RATE (15 min)
 export const HORDE_SPAWN_BURST_MAX = 3;      // enemies per spawn tick at max escalation
 export const HORDE_PLAYER_PRESSURE = 0.4;    // extra spawn rate per extra player
-export const HORDE_THREAT_INTERVAL = 45;     // seconds per displayed threat level
-export const HORDE_VICTORY_TIME = 0;         // 0 = endless survival, >0 = survive N s to win
+export const HORDE_THREAT_INTERVAL = 60;     // seconds per displayed threat level
+export const HORDE_VICTORY_TIME = 1200;      // survive 20 minutes to win
+
+// ─── Difficulty ────────────────────────────────────────────
+/**
+ * Share of the hard-mode horde each level fields. The multiplier scales the
+ * spawn rate (and the live enemy cap) off the hard baseline, which is the
+ * current, unchanged game: medium is half as thick, easy a quarter.
+ */
+export const DIFFICULTY_MULTIPLIER: Record<Difficulty, number> = {
+  [Difficulty.EASY]: 0.25,
+  [Difficulty.MEDIUM]: 0.5,
+  [Difficulty.HARD]: 1.0,
+};
+
+/** Human labels for the menu and the HUD. */
+export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  [Difficulty.EASY]: 'EASY',
+  [Difficulty.MEDIUM]: 'MEDIUM',
+  [Difficulty.HARD]: 'HARD',
+};
+
+/** A room with no difficulty chosen defaults to the easy horde. */
+export const DEFAULT_DIFFICULTY = Difficulty.EASY;
 
 // ─── Map ───────────────────────────────────────────────────
 export const MAP_SIZE = 300;             // meters (square)

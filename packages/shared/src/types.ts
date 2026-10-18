@@ -30,6 +30,17 @@ export enum PlayerState {
   COOLDOWN = 'cooldown',     // Drone destroyed, waiting
 }
 
+// ─── Difficulty ────────────────────────────────────────────
+/**
+ * How thick the horde is. Hard is the current, unchanged game; the others field
+ * a smaller share of it (see DIFFICULTY_MULTIPLIER in constants.ts).
+ */
+export enum Difficulty {
+  EASY = 'easy',
+  MEDIUM = 'medium',
+  HARD = 'hard',
+}
+
 // ─── Vector3 ───────────────────────────────────────────────
 export interface Vec3 {
   x: number;
@@ -128,6 +139,8 @@ export interface GameState {
   leaks: number;           // enemies that made it through to the fort (never ends the game)
   playerCount: number;
   roomCode: string;
+  /** The difficulty the host created the room with. */
+  difficulty: Difficulty;
   enemies: EnemyData[];
   structures: StructureData[];   // village buildings and parked cars (static)
 

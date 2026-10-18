@@ -4,7 +4,7 @@ import { InputManager } from './input/InputManager';
 import { HUD } from './ui/HUD';
 import {
   ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS, WeaponType, PlayerState,
-  HMG_NESTS, HMG_WEAPONS, hmgGunOf,
+  HMG_NESTS, HMG_WEAPONS, hmgGunOf, Difficulty,
 } from '@red-attack/shared';
 
 // ─── Bootstrap ─────────────────────────────────────────────
@@ -14,6 +14,7 @@ const btnStart = document.getElementById('btn-start') as HTMLButtonElement;
 const btnJoin = document.getElementById('btn-join') as HTMLButtonElement;
 const nameInput = document.getElementById('player-name') as HTMLInputElement;
 const roomCodeInput = document.getElementById('room-code') as HTMLInputElement;
+const difficultySelect = document.getElementById('difficulty') as HTMLSelectElement;
 const errorMsg = document.getElementById('error-msg') as HTMLElement;
 const roomToast = document.getElementById('room-toast') as HTMLElement;
 const roomToastCode = document.getElementById('room-toast-code') as HTMLElement;
@@ -125,9 +126,10 @@ btnStart.addEventListener('click', async () => {
   if (gameStarted) return;
   gameStarted = true;
   const name = nameInput.value.trim() || 'Pilot';
+  const difficulty = (difficultySelect?.value as Difficulty) || Difficulty.EASY;
   overlay.classList.add('hidden');
   try {
-    await network.connect(name);
+    await network.connect(name, undefined, difficulty);
     scene.setLocalPlayerId(network.sessionId);
     input.lockPointer();
     // Show room code toast once state arrives

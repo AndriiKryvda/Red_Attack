@@ -1,6 +1,6 @@
 # 🔴 Red Attack
 
-A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an endless horde. Two weapons are on the table: fly a kamikaze drone in first-person view for precision work, or stand at the tube mortar and put shells across the middle of the field. The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
+A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an escalating horde for 20 minutes. Two weapons are on the table: fly a kamikaze drone in first-person view for precision work, or stand at the tube mortar and put shells across the middle of the field. The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
 
 ## Tech Stack
 
@@ -169,7 +169,7 @@ was worth, which is what every client draws the tracer to.
 
 ## Multiplayer
 
-- **Create Game** — generates a 4-digit numeric room code (digits only, no letters).
+- **Create Game** — generates a 4-digit numeric room code (digits only, no letters). The host also picks a **difficulty** (Easy / Medium / Hard) for the room; joiners inherit whatever the host chose.
 - **Join Game** — enter the room code to join a friend's session.
 - Up to **10 players** per room.
 - Each player pilots their own drone independently.
@@ -190,15 +190,17 @@ was worth, which is what every client draws the tracer to.
 | Mortar shell | 9 m blast — kills everything it catches, tank included, and lands one heavy hit on any building inside it |
 | Mortar reload | 8 s per pilot |
 | Mortar flight | 1.9 s at 30 m → 3.8 s at 120 m, apex 15–54 m |
-| Horde spawn rate | 0.35 → 1.6 enemies/s (ramps over 9 min, ×players) |
-| Threat level | +1 every 45 s |
+| Horde spawn rate | 0.35 → 2.0 enemies/s (ramps over 15 min, ×players) |
+| Difficulty | Easy / Medium / Hard — scales the horde to 25% / 50% / 100% of the hard spawn rate and live enemy cap (Easy is the default) |
+| Threat level | +1 every 60 s |
+| Victory condition | Survive 20 minutes |
 | Spawn directions | weighted to the village: 40% north, 40% east, 10% west, 10% south (out on the map border, 142–149 m from the fort) |
 | Door spawns | 75% of the spawns on a built-up side step out of a building doorway |
 | Village | 14 buildings + 12 parked cars, on the north and east edges 126 m out |
 | Wreckage burn | open flame ~14 s, smoke until 55 s, up to 12 piles at once |
 | Max players | 10 |
 
-### Endless Horde
+### Escalating Horde
 
 There are no discrete waves. Enemies stream toward the fort continuously out on
 the map border (142–149 m out, so every enemy has to cross nearly the whole
@@ -210,8 +212,8 @@ of off the open field (see [The Village](#the-village)).
 The three foot types — Cheburashka, soldier, bear — can show up in the very first
 seconds of a run; the vehicles join in only once the pilots have racked up enough
 kills (see the table below), and the HUD shouts `⚠ NEW ENEMY INCOMING` the moment
-one unlocks. A run ends when the outpost falls (set `HORDE_VICTORY_TIME` in
-`packages/shared` to make it a timed-survival win instead).
+one unlocks. A run ends in victory after surviving 20 minutes, or in defeat if
+the outpost falls before then.
 
 ### Enemy Types
 

@@ -1,5 +1,5 @@
 import { Client, Room } from '@colyseus/sdk';
-import { GameState, ServerEvent, WeaponType, MAX_PLAYERS } from '@red-attack/shared';
+import { GameState, ServerEvent, WeaponType, MAX_PLAYERS, Difficulty } from '@red-attack/shared';
 
 export class NetworkClient {
   private client: Client;
@@ -21,7 +21,7 @@ export class NetworkClient {
 
   get sessionId(): string { return this._sessionId; }
 
-  async connect(name: string, roomCode?: string) {
+  async connect(name: string, roomCode?: string, difficulty?: Difficulty) {
     try {
       if (roomCode) {
         // Resolve room code to roomId via server HTTP endpoint
@@ -34,7 +34,7 @@ export class NetworkClient {
         const { roomId } = await res.json();
         this.room = await this.client.joinById(roomId, { name });
       } else {
-        this.room = await this.client.joinOrCreate('game', { name });
+        this.room = await this.client.joinOrCreate('game', { name, difficulty });
       }
       this._sessionId = this.room.sessionId;
       console.log('[Net] Joined room:', this.room.roomId, 'as', this._sessionId);

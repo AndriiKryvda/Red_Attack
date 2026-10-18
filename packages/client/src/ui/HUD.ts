@@ -1,4 +1,4 @@
-import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf } from '@red-attack/shared';
+import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf, DIFFICULTY_LABELS } from '@red-attack/shared';
 import { DRONE_MAX_FLIGHT_TIME } from '@red-attack/shared';
 
 export class HUD {
@@ -75,9 +75,10 @@ export class HUD {
       this.compassRose.style.transform = `rotate(${(-heading * 180) / Math.PI}deg)`;
     }
 
-    // Room code
+    // Room code, with the difficulty the host created the room with.
     if (state.roomCode) {
-      this.roomCodeDisplay.textContent = `ROOM: ${state.roomCode}`;
+      const diff = state.difficulty ? ` · ${DIFFICULTY_LABELS[state.difficulty]}` : '';
+      this.roomCodeDisplay.textContent = `ROOM: ${state.roomCode}${diff}`;
     }
 
     // Breach counter — enemies that made it to the fort. It is purely a score:

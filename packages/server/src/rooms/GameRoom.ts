@@ -4,8 +4,8 @@ import {
   EnemyData, DroneData, PlayerData, Vec3, ClientMessage,
   StructureData, StructureVariant,
   DRONE_SPEED, DRONE_BOOST_MULTIPLIER, DRONE_BOOST_COOLDOWN,
-  DRONE_MAX_FLIGHT_TIME, DRONE_MAX_DISTANCE, DRONE_RELOAD_TIME,
-  DRONE_KILL_RADIUS, DRONE_SLOW_RADIUS, DRONE_SLOW_DURATION, DRONE_FREEZE_DURATION,
+  DRONE_RELOAD_TIME, DRONE_KILL_RADIUS, DRONE_SLOW_RADIUS,
+  DRONE_SLOW_DURATION, DRONE_FREEZE_DURATION, DRONE_GROUND_HEIGHT,
   ENEMY_STATS, ENEMY_DEATH_LINGER_TIME,
   ALL_ENEMY_TYPES, ENEMY_UNLOCK_KILLS, ENEMY_SPAWN_WEIGHTS,
   MAX_ACTIVE_ENEMIES, TICK_RATE, MAX_PLAYERS,
@@ -25,6 +25,8 @@ import {
   HMG_NESTS, HMG_BELT_SIZE, HMG_RELOAD_TIME, HMG_ROUNDS_PER_SEC, HMG_DAMAGE,
   HMG_MAX_RANGE, HMG_SPREAD, HMG_INPUT_TIMEOUT, hmgGunOf, clampHmgPitch,
   hmgDirection, hmgMuzzle,
+  generateTreeSpots, TREE_COLLISION_RADIUS, TREE_BASE_HEIGHT,
+  type TreeSpot,
 } from '@red-attack/shared';
 import { roomCodeRegistry } from '../index.js';
 
@@ -108,6 +110,8 @@ export class GameRoom extends Room {
   doors: Map<SpawnEdge, InternalStructure[]> = new Map();
   /** Shells currently in the air from the fort's mortar. */
   shells: Map<string, InternalShell> = new Map();
+  /** Deterministic tree positions for drone collision (same layout as the client). */
+  private treeSpots: TreeSpot[] = generateTreeSpots();
 
   private spawnAccumulator: number = 0;
   private idCounter: number = 0;
@@ -491,6 +495,26 @@ export class GameRoom extends Room {
     });
   }
 
+  /**
+   * Returns true if the drone is inside a tree's collision cylinder. Each tree is
+   * modelled as a vertical cylinder centred on its trunk with radius
+   * TREE_COLLISION_RADIUS × scale and height TREE_BASE_HEIGHT × scale.
+   */
+  private checkTreeCollision(drone: InternalDrone): boolean {
+    const px = drone.position.x;
+    const py = drone.position.y;
+    const pz = drone.position.z;
+    for (const tree of this.treeSpots) {
+      const radius = TREE_COLLISION_RADIUS * tree.scale;
+      const height = TREE_BASE_HEIGHT * tree.scale;
+      const dx = px - tree.x;
+      const dz = pz - tree.z;
+      if (dx * dx + dz * dz > radius * radius) continue;
+      if (py < height) return true;
+    }
+    return false;
+  }
+
   private tickEnemies() {
     const dt = TICK_RATE / 1000;
     for (const [id, enemy] of this.enemies) {
@@ -723,11 +747,6 @@ export class GameRoom extends Room {
     const dt = TICK_RATE / 1000;
     for (const [id, drone] of this.drones) {
       if (!drone.alive) continue;
-      const elapsed = (this.serverTime - drone.launchedAt) / 1000;
-      if (elapsed > DRONE_MAX_FLIGHT_TIME) { this.explodeDrone(drone); continue; }
-
-      const distFromCenter = Math.sqrt(drone.position.x ** 2 + drone.position.z ** 2);
-      if (distFromCenter > DRONE_MAX_DISTANCE) { this.explodeDrone(drone); continue; }
 
       const input = drone.input;
       const speed = DRONE_SPEED * (input.boost && this.serverTime > drone.boostCooldownUntil ? DRONE_BOOST_MULTIPLIER : 1);
@@ -747,7 +766,9 @@ export class GameRoom extends Room {
       drone.position.x += drone.velocity.x * dt;
       drone.position.y += drone.velocity.y * dt;
       drone.position.z += drone.velocity.z * dt;
-      if (drone.position.y < 0.5) drone.position.y = 0.5;
+
+      // Ground contact: drone crashes and detonates
+      if (drone.position.y <= DRONE_GROUND_HEIGHT) { this.explodeDrone(drone); continue; }
       if (drone.position.y > 50) drone.position.y = 50;
 
       this.checkDroneCollisions(drone);
@@ -763,6 +784,9 @@ export class GameRoom extends Room {
     // The village is solid: a quad that flies into a wall detonates there instead
     // of passing straight through to the enemy standing behind it.
     contacts += this.checkStructureHits(drone);
+
+    // Trees are solid: a quad that clips a trunk or foliage detonates.
+    if (this.checkTreeCollision(drone)) { this.explodeDrone(drone); return; }
 
     for (const [, enemy] of this.enemies) {
       if (enemy.dead) continue;

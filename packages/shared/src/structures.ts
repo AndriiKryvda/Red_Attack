@@ -87,9 +87,8 @@ export const CAR_VARIANTS: CarVariant[] = [
 ];
 
 // ─── Village layout ──────────────────────────────────────────────────────────
-// The strip sits far enough out that a kamikaze run reaches it with flight time
-// to spare: the worst corner is hypot(VILLAGE_SPREAD, VILLAGE_EDGE_OFFSET) ≈ 159 m
-// against a DRONE_MAX_DISTANCE of 175 m.
+// The strip sits far enough out that a kamikaze run reaches it with room to
+// spare: the worst corner is hypot(VILLAGE_SPREAD, VILLAGE_EDGE_OFFSET) ≈ 159 m.
 
 /** Meters from the fort to the line the buildings stand on. */
 export const VILLAGE_EDGE_OFFSET = 126;

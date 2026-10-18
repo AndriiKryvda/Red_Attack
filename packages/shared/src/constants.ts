@@ -4,11 +4,8 @@ import { EnemyType, Difficulty } from './types.js';
 export const DRONE_SPEED = 15;           // m/s
 export const DRONE_BOOST_MULTIPLIER = 2;
 export const DRONE_BOOST_COOLDOWN = 3;   // seconds
-export const DRONE_MAX_FLIGHT_TIME = 20; // seconds
-// A quad gives up and RTBs past this. It has to stay above the horde spawn ring
-// further down with room to spare, or an enemy spawned out on the map border
-// would be untouchable for a kamikaze run that has to steer around anything.
-export const DRONE_MAX_DISTANCE = 175;   // meters from outpost
+/** Altitude at or below which a quad crashes into the ground and detonates. */
+export const DRONE_GROUND_HEIGHT = 0.5;  // meters
 export const DRONE_RELOAD_TIME = 5;      // seconds
 export const DRONE_KILL_RADIUS = 3;      // meters
 export const DRONE_SLOW_RADIUS = 6;      // meters

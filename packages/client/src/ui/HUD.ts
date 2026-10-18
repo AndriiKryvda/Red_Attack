@@ -1,5 +1,4 @@
 import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf, DIFFICULTY_LABELS } from '@red-attack/shared';
-import { DRONE_MAX_FLIGHT_TIME } from '@red-attack/shared';
 
 export class HUD {
   private breachDisplay: HTMLElement;
@@ -149,11 +148,11 @@ export class HUD {
         this.flightPanel.style.display = 'block';
         const spd = Math.hypot(drone.velocity.x, drone.velocity.y, drone.velocity.z);
         const dist = Math.hypot(drone.position.x, drone.position.z);
-        const timeLeft = Math.max(0, DRONE_MAX_FLIGHT_TIME - (state.serverTime - drone.launchedAt) / 1000);
+        const elapsed = (state.serverTime - drone.launchedAt) / 1000;
         this.flAlt.textContent = drone.position.y.toFixed(1);
         this.flSpd.textContent = spd.toFixed(1);
         this.flDist.textContent = dist.toFixed(0);
-        this.flTime.textContent = timeLeft.toFixed(1);
+        this.flTime.textContent = elapsed.toFixed(1);
       } else {
         this.flightPanel.style.display = 'none';
       }

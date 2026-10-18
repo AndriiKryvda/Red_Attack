@@ -316,9 +316,11 @@ it costs no bandwidth and no server state.
 
 ## Sound
 
-Every sound in the game is **synthesized live in the browser** — there is not a
-single audio file in the repo, and the game works with the network unplugged.
-The whole layer lives in `packages/client/src/audio/`:
+Every sound in the game is **synthesized live in the browser** — gunfire,
+explosions, engines and the horde's battle cries are all generated from
+oscillators and noise buffers, so the game works with the network unplugged and
+ships without a single required audio file. The whole layer lives in
+`packages/client/src/audio/`:
 
 - **`AudioManager.ts`** — a Web Audio graph built lazily on the first menu click
   (the browser will not let a page make noise before that). Gunfire, explosions,
@@ -341,9 +343,17 @@ The whole layer lives in `packages/client/src/audio/`:
   the game does. No audio files, no network, no voices to ship — just a
   `ru-RU` voice the browser already has.
 
-Press **`M`** at any time to mute or unmute everything, battle cries included;
-the HUD flashes `🔊 SOUND ON` / `🔇 SOUND OFF` so you know which way you just
-toggled it.
+**Background music (optional).** A looping track plays under the battle from the
+moment you start or join a game. It is a plain MP3 dropped into
+`packages/client/public/audio/lenta-za-lentoyu.mp3` (served at
+`/audio/lenta-za-lentoyu.mp3`), folded into the same master bus as everything
+else at a low volume so gunfire still cuts through. The repo does not ship the
+file — drop your own copy there to hear it. If the file is missing the game runs
+exactly as before, just without a soundtrack.
+
+Press **`M`** at any time to mute or unmute everything, battle cries and the
+background track included; the HUD flashes `🔊 SOUND ON` / `🔇 SOUND OFF` so you
+know which way you just toggled it.
 
 ## Build for Production
 

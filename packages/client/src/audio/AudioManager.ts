@@ -21,6 +21,15 @@ interface Whistle {
 }
 
 /**
+ * The looping background track, dropped into `public/audio/` and served at
+ * `/audio/...` by Vite. The game ships without it: if the file is absent the
+ * music simply fails to load and the battle plays on without a soundtrack.
+ */
+const MUSIC_URL = '/audio/lenta-za-lentoyu.mp3';
+/** Music sits under the battlefield: gunfire and explosions stay the loudest layer. */
+const MUSIC_VOLUME = 0.35;
+
+/**
  * Every sound in the game, synthesized live with the Web Audio API — gunfire,
  * explosions, the mortar's whistle, tank engines and the drone's buzz all come
  * out of oscillators and noise buffers, so the game ships without a single audio
@@ -63,6 +72,11 @@ export class AudioManager {
   private droneOn = false;
   private readonly whistles = new Map<string, Whistle>();
 
+  /** The looping background track: an <audio> element folded into the master bus. */
+  private musicEl: HTMLAudioElement | null = null;
+  private musicSrc: MediaElementAudioSourceNode | null = null;
+  private musicGain: GainNode | null = null;
+
   /** Build the audio graph. Must run inside a user gesture (a menu click). */
   init(): void {
     if (this.ctx) {
@@ -84,6 +98,36 @@ export class AudioManager {
 
     for (let i = 0; i < 2; i++) this.engines.push(this.createEngine());
     this.droneGain = this.createDroneHum();
+    this.initMusic();
+  }
+
+  /**
+   * A looping background track on the master bus, so the M mute already covers it
+   * alongside gunfire and engines. It is started here, inside init()'s user
+   * gesture, to satisfy the browser's autoplay rule. If the file is missing the
+   * game plays on silently — the music is a bonus, never a requirement.
+   */
+  private initMusic(): void {
+    if (!this.ctx || !this.master || this.musicEl) return;
+    const el = new Audio(MUSIC_URL);
+    el.loop = true;
+    el.preload = 'auto';
+    el.volume = 1; // the level is set by musicGain, not the element itself.
+    el.addEventListener('error', () => {
+      console.warn(`[Audio] background track not found at ${MUSIC_URL}; playing without music`);
+    });
+    try {
+      const src = this.ctx.createMediaElementSource(el);
+      const gain = this.ctx.createGain();
+      gain.gain.value = MUSIC_VOLUME;
+      src.connect(gain).connect(this.master);
+      this.musicSrc = src;
+      this.musicGain = gain;
+      this.musicEl = el;
+      void el.play().catch(() => { /* autoplay still blocked; stays silent until the next gesture */ });
+    } catch (e) {
+      console.warn('[Audio] could not start background music', e);
+    }
   }
 
   get ready(): boolean {

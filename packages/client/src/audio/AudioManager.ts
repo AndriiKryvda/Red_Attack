@@ -27,7 +27,9 @@ interface Whistle {
  */
 const MUSIC_URL = '/audio/lenta-za-lentoyu.mp3';
 /** Music sits under the battlefield: gunfire and explosions stay the loudest layer. */
-const MUSIC_VOLUME = 0.35;
+const MUSIC_VOLUME = 0.25;
+/** The track re-starts from the top every 5 minutes (start at 0, 5, 10, … min). */
+const MUSIC_RESTART_MS = 5 * 60 * 1000;
 
 /**
  * Every sound in the game, synthesized live with the Web Audio API — gunfire,
@@ -76,6 +78,8 @@ export class AudioManager {
   private musicEl: HTMLAudioElement | null = null;
   private musicSrc: MediaElementAudioSourceNode | null = null;
   private musicGain: GainNode | null = null;
+  /** Interval handle that rewinds the track to the top every MUSIC_RESTART_MS. */
+  private musicTimer: number | null = null;
 
   /** Build the audio graph. Must run inside a user gesture (a menu click). */
   init(): void {
@@ -102,15 +106,17 @@ export class AudioManager {
   }
 
   /**
-   * A looping background track on the master bus, so the M mute already covers it
-   * alongside gunfire and engines. It is started here, inside init()'s user
-   * gesture, to satisfy the browser's autoplay rule. If the file is missing the
-   * game plays on silently — the music is a bonus, never a requirement.
+   * A background track on the master bus, so the M mute already covers it alongside
+   * gunfire and engines. It is started here, inside init()'s user gesture, to
+   * satisfy the browser's autoplay rule, and then rewound to the top every
+   * MUSIC_RESTART_MS — so it starts at 0, 5, 10, … minutes rather than looping on
+   * its own. If the file is missing the game plays on silently: the music is a
+   * bonus, never a requirement.
    */
   private initMusic(): void {
     if (!this.ctx || !this.master || this.musicEl) return;
     const el = new Audio(MUSIC_URL);
-    el.loop = true;
+    el.loop = false; // the restart timer, not the element, drives the repeats.
     el.preload = 'auto';
     el.volume = 1; // the level is set by musicGain, not the element itself.
     el.addEventListener('error', () => {
@@ -125,6 +131,13 @@ export class AudioManager {
       this.musicGain = gain;
       this.musicEl = el;
       void el.play().catch(() => { /* autoplay still blocked; stays silent until the next gesture */ });
+      // Re-start the track from the top every 5 minutes.
+      this.musicTimer = window.setInterval(() => {
+        const m = this.musicEl;
+        if (!m) return;
+        m.currentTime = 0;
+        void m.play().catch(() => { /* ignore: still blocked or already playing */ });
+      }, MUSIC_RESTART_MS);
     } catch (e) {
       console.warn('[Audio] could not start background music', e);
     }

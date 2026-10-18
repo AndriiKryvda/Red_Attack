@@ -343,8 +343,9 @@ ships without a single required audio file. The whole layer lives in
   the game does. No audio files, no network, no voices to ship — just a
   `ru-RU` voice the browser already has.
 
-**Background music (optional).** A looping track plays under the battle from the
-moment you start or join a game. It is a plain MP3 dropped into
+**Background music (optional).** A track plays under the battle from the moment
+you start or join a game, and re-starts from the top every 5 minutes (at the 0th,
+5th, 10th minute, …). It is a plain MP3 dropped into
 `packages/client/public/audio/lenta-za-lentoyu.mp3` (served at
 `/audio/lenta-za-lentoyu.mp3`), folded into the same master bus as everything
 else at a low volume so gunfire still cuts through. The repo does not ship the

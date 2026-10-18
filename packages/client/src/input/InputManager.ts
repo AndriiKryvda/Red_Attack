@@ -6,6 +6,8 @@ export interface InputState {
   pitch: number;      // absolute pitch from mouse Y
   up: number;
   boost: boolean;
+  /** Held while the Vampire's bomb release (F) is down; the server paces the drops. */
+  bombDrop: boolean;
 }
 
 /**
@@ -34,6 +36,8 @@ export class InputManager {
   private canvas: HTMLCanvasElement;
   private pointerLocked: boolean = false;
   private mouseDown: boolean = false;
+  /** True while the Vampire's bomb-release key (F) is held. */
+  private bombDropHeld: boolean = false;
 
   // Pointer-lock bookkeeping. A browser drops the pointer lock the moment the
   // window or tab loses focus, so the game has to win it back when the player
@@ -54,6 +58,11 @@ export class InputManager {
    * the click that wins the capture back must never double as a shot.
    */
   onFireMouse: (() => void) | null = null;
+  /**
+   * Fired on a left mouse press while manning the Vampire: one click releases one
+   * mini-bomb. Like onFireMouse it only counts once the mouse is already captured.
+   */
+  onDropBomb: (() => void) | null = null;
   onSelfDestruct: (() => void) | null = null;
   onToggleKeysGuide: (() => void) | null = null;
   /** Pick a weapon outright (1 = quad, 2 = mortar). */
@@ -71,6 +80,8 @@ export class InputManager {
   // the lay belongs to the gun, it is clamped to what the pintle allows, and the
   // trigger is held down for as long as the belt is meant to run.
   private hmgMode: boolean = false;
+  /** True while the pilot is flying a Vampire: LMB drops a bomb instead of boosting. */
+  private vampireMode: boolean = false;
   private hmgYaw: number = 0;
   private hmgPitch: number = 0;
   /** Space or the left button, for as long as it is held. */
@@ -116,6 +127,12 @@ export class InputManager {
       if (e.code === 'KeyR') {
         if (this.onSelfDestruct) this.onSelfDestruct();
       }
+      if (e.code === 'KeyF') {
+        // Vampire bomb release. Held, not tapped: the server paces the stack at its
+        // own drop interval, so holding F walks the bombs off one at a time.
+        e.preventDefault();
+        this.bombDropHeld = true;
+      }
       if (e.code === 'KeyH') {
         if (this.onToggleKeysGuide) this.onToggleKeysGuide();
       }
@@ -126,6 +143,17 @@ export class InputManager {
       if (e.code === 'Digit2' || e.code === 'Numpad2') {
         e.preventDefault();
         if (this.onSelectWeapon) this.onSelectWeapon(WeaponType.MORTAR);
+      }
+      if (e.code === 'Digit7' || e.code === 'Numpad7') {
+        // The Vampire bomber: a flown quad like the FPV, but it drops bombs instead
+        // of flying into the target. 7 mans it; V is kept below as an alias.
+        e.preventDefault();
+        if (this.onSelectWeapon) this.onSelectWeapon(WeaponType.VAMPIRE);
+      }
+      if (e.code === 'KeyV') {
+        // Alias for the Vampire bomber (7 is the primary key).
+        e.preventDefault();
+        if (this.onSelectWeapon) this.onSelectWeapon(WeaponType.VAMPIRE);
       }
       // 3 to 6 man one of the four machine guns.
       const hmg = HMG_KEYS[e.code];
@@ -145,12 +173,21 @@ export class InputManager {
     document.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
       if (e.code === 'Space') this.trigger = false;
+      if (e.code === 'KeyF') this.bombDropHeld = false;
     });
 
     document.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       this.mouseDown = true;
       this.trigger = true;
+      // While manning the Vampire the left button is the bomb release: one click,
+      // one mini-bomb (the server still paces the stack and refuses a drop that is
+      // too low, empty or already homing home). It only counts once the mouse is
+      // already captured, so the click that re-captures it cannot drop a bomb.
+      if (this.pointerLocked && this.vampireMode) {
+        if (this.onDropBomb) this.onDropBomb();
+        return;
+      }
       // Left click is the mortar's trigger as well as the drone's boost. It only
       // counts once the mouse is captured, so the click that re-captures it (or a
       // click on the menu before the game starts) cannot send a shell by accident.
@@ -315,6 +352,7 @@ export class InputManager {
     this.keys.clear();
     this.mouseDown = false;
     this.trigger = false;
+    this.bombDropHeld = false;
     this.pendingYawDelta = 0;
   }
 
@@ -346,6 +384,14 @@ export class InputManager {
     if (on === this.hmgMode) return;
     this.hmgMode = on;
     this.trigger = false;
+  }
+
+  /**
+   * Fly a Vampire or not: while true the left mouse button releases a mini-bomb
+   * instead of boosting the aircraft.
+   */
+  setVampireMode(on: boolean) {
+    this.vampireMode = on;
   }
 
   /**
@@ -414,7 +460,10 @@ export class InputManager {
       yawDelta,
       pitch: this.pitch,
       up,
-      boost: this.mouseDown,
+      // While bombing from the Vampire the left button is the bomb release, not a
+      // boost, so suppress boost there (Shift/Space still set altitude).
+      boost: this.mouseDown && !this.vampireMode,
+      bombDrop: this.bombDropHeld,
     };
   }
 }

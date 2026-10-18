@@ -22,6 +22,10 @@ import {
   WeaponType, clampMortarTarget, mortarBallistics, mortarShellHeight, MortarShot,
   MORTAR_POSITION, MORTAR_MUZZLE_HEIGHT, MORTAR_RELOAD_TIME, MORTAR_KILL_RADIUS,
   MORTAR_DAMAGE, MORTAR_BLAST_SCALE,
+  VAMPIRE_BOMB_CAPACITY, VAMPIRE_MIN_DROP_ALTITUDE, VAMPIRE_DROP_INTERVAL,
+  VAMPIRE_RELOAD_TIME, VAMPIRE_SPEED, VAMPIRE_CRUISE_ALTITUDE, VAMPIRE_LAUNCH_ALTITUDE,
+  VAMPIRE_BOMB_DAMAGE, VAMPIRE_BOMB_RADIUS, VAMPIRE_BOMB_BLAST_SCALE,
+  VAMPIRE_BASE, VAMPIRE_BASE_RADIUS, vampireBombFlight, vampireBombHeight,
   HMG_NESTS, HMG_BELT_SIZE, HMG_RELOAD_TIME, HMG_ROUNDS_PER_SEC, HMG_DAMAGE,
   HMG_MAX_RANGE, HMG_SPREAD, HMG_INPUT_TIMEOUT, hmgGunOf, clampHmgPitch,
   hmgDirection, hmgMuzzle,
@@ -50,6 +54,16 @@ interface InternalStructure extends StructureData {
 interface InternalDrone extends DroneData {
   boostCooldownUntil: number;
   input: { forward: number; up: number; boost: boolean };
+  /** 'fpv' is a one-hit kamikaze quad; 'vampire' carries a stack of mini-bombs. */
+  kind: 'fpv' | 'vampire';
+  /** Mini-bombs left in the stack (Vampire only; 0 for an FPV). */
+  vampireBombs: number;
+  /** True while an empty Vampire is on autopilot home to re-arm (input ignored). */
+  returning: boolean;
+  /** Timestamp the last bomb was released, to pace the drop interval. */
+  lastDropAt: number;
+  /** Timestamp the pad crew finishes re-arming, or 0 when not on the pad. */
+  vampireReloadAt: number;
 }
 
 interface InternalPlayer extends PlayerData {
@@ -77,6 +91,29 @@ interface InternalShell {
   /** Seconds of flight, from mortarBallistics. */
   flight: number;
   /** Where it is committed to landing. */
+  impact: Vec3;
+}
+
+/**
+ * One mini-bomb in the air under a Vampire. Like a shell it is resolved in closed
+ * form on every tick from where it was released, so the server only has to notice
+ * the moment it comes back down onto the ground.
+ */
+interface InternalBomb {
+  id: string;
+  ownerId: string;
+  /** Where it was released, in world space. */
+  origin: Vec3;
+  /** Live position, recomputed each tick and synced to clients for the render. */
+  position: Vec3;
+  /** Horizontal drift inherited from the aircraft at release (y stays 0). */
+  velocity: Vec3;
+  /** Altitude it fell from, for the closed-form height. */
+  originY: number;
+  firedAt: number;
+  /** Seconds from release down to the ground. */
+  flight: number;
+  /** Where it lands, so the score credit can be handed to the pilot who dropped it. */
   impact: Vec3;
 }
 
@@ -110,6 +147,8 @@ export class GameRoom extends Room {
   doors: Map<SpawnEdge, InternalStructure[]> = new Map();
   /** Shells currently in the air from the fort's mortar. */
   shells: Map<string, InternalShell> = new Map();
+  /** Mini-bombs currently falling from the Vampire bombers. */
+  bombs: Map<string, InternalBomb> = new Map();
   /** Deterministic tree positions for drone collision (same layout as the client). */
   private treeSpots: TreeSpot[] = generateTreeSpots();
 
@@ -117,6 +156,7 @@ export class GameRoom extends Room {
   private idCounter: number = 0;
   private structureIdCounter: number = 0;
   private shellIdCounter: number = 0;
+  private bombIdCounter: number = 0;
   /** Enemy types whose kill threshold has been reached (and announced). */
   private unlockedEnemies: Set<EnemyType> = new Set();
 
@@ -163,6 +203,9 @@ export class GameRoom extends Room {
       manningGun: -1,
       hmgYaw: HMG_NESTS[0].yaw,
       hmgPitch: 0,
+      vampireBombs: 0,
+      vampireReturning: false,
+      vampireReloadAt: 0,
       lastInput: Date.now(),
       hmgFireAcc: perGun(0),
       hmgLastShotAt: perGun(0),
@@ -187,6 +230,10 @@ export class GameRoom extends Room {
     // belonging to anyone, so nobody inherits the score.
     for (const [sid, shell] of this.shells) {
       if (shell.ownerId === id) this.shells.delete(sid);
+    }
+    // A dropped mini-bomb behaves the same way: it still falls and still detonates.
+    for (const [bid, bomb] of this.bombs) {
+      if (bomb.ownerId === id) this.bombs.delete(bid);
     }
     this.players.delete(id);
   }
@@ -294,6 +341,7 @@ export class GameRoom extends Room {
       this.tickEnemies();
       this.tickDrones();
       this.tickShells();
+      this.tickBombs();
       this.tickHmgs();
       this.tickCooldowns();
     }
@@ -630,6 +678,158 @@ export class GameRoom extends Room {
     });
   }
 
+  // ─── Vampire bomber ──────────────────────────────────────
+
+  /**
+   * Release one mini-bomb from the Vampire. The bomb keeps the aircraft's horizontal
+   * velocity but starts with no vertical velocity of its own, so it simply falls from
+   * the current altitude; the whole path is closed form (see `vampireBombFlight`), so
+   * the server only has to notice the tick it touches down. When the last bomb leaves,
+   * the bomber flips to autopilot and flies itself home to re-arm.
+   */
+  private dropBomb(player: InternalPlayer, drone: InternalDrone) {
+    const altitude = drone.position.y;
+    drone.vampireBombs -= 1;
+    drone.lastDropAt = this.serverTime;
+    player.vampireBombs = drone.vampireBombs;
+
+    const flight = vampireBombFlight(altitude);
+    const bomb: InternalBomb = {
+      id: `b_${this.bombIdCounter++}`,
+      ownerId: player.id,
+      origin: { ...drone.position },
+      position: { ...drone.position },
+      velocity: { x: drone.velocity.x, y: 0, z: drone.velocity.z },
+      originY: altitude,
+      firedAt: this.serverTime,
+      flight,
+      impact: {
+        x: drone.position.x + drone.velocity.x * flight,
+        y: 0,
+        z: drone.position.z + drone.velocity.z * flight,
+      },
+    };
+    this.bombs.set(bomb.id, bomb);
+
+    // The stack is dry: hand the aircraft to the autopilot for the trip home.
+    if (drone.vampireBombs <= 0) {
+      drone.returning = true;
+      player.vampireReturning = true;
+    }
+  }
+
+  /**
+   * Walk every mini-bomb down its fall. Nothing is networked per frame: the position
+   * falls straight out of the release point and inherited drift, so the server only
+   * has to notice the moment a bomb comes back down onto the ground.
+   */
+  private tickBombs() {
+    for (const bomb of this.bombs.values()) {
+      const t = (this.serverTime - bomb.firedAt) / 1000;
+      const height = vampireBombHeight(bomb.originY, t);
+      if (t >= bomb.flight || height <= 0) {
+        this.detonateBomb(bomb);
+      } else {
+        // Keep the synced position current so the client draws the falling bomb.
+        bomb.position.x = bomb.origin.x + bomb.velocity.x * t;
+        bomb.position.y = height;
+        bomb.position.z = bomb.origin.z + bomb.velocity.z * t;
+      }
+    }
+  }
+
+  /**
+   * A mini-bomb lands and detonates: a footprint between a quad and a shell, so it
+   * clears a cluster of infantry or wounds a tank but does not level a building the
+   * way a shell does. The pilot who dropped it gets the credit, exactly as for a shell.
+   */
+  private detonateBomb(bomb: InternalBomb) {
+    this.bombs.delete(bomb.id);
+    const radiusSq = VAMPIRE_BOMB_RADIUS * VAMPIRE_BOMB_RADIUS;
+    let kills = 0;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.dead) continue;
+      const dx = bomb.impact.x - enemy.position.x;
+      const dz = bomb.impact.z - enemy.position.z;
+      if (dx * dx + dz * dz > radiusSq) continue;
+      if (this.damageEnemy(enemy, bomb.ownerId, VAMPIRE_BOMB_DAMAGE)) kills++;
+    }
+    for (const st of this.structures.values()) {
+      if (st.destroyed) continue;
+      const dx = bomb.impact.x - st.x;
+      const dz = bomb.impact.z - st.z;
+      if (dx * dx + dz * dz > radiusSq) continue;
+      this.damageStructure(st, bomb.ownerId);
+    }
+    if (kills >= MULTI_KILL_THRESHOLD) {
+      const player = this.players.get(bomb.ownerId);
+      if (player) player.score += MULTI_KILL_BONUS;
+    }
+    this.broadcastEvent({
+      type: 'explosion', position: { ...bomb.impact },
+      radius: VAMPIRE_BOMB_RADIUS, scale: VAMPIRE_BOMB_BLAST_SCALE,
+    });
+  }
+
+  /**
+   * Fly an empty Vampire home on its own. It climbs to the cruise altitude, steers
+   * level at the pad, settles down onto it, and sits there while the crew re-arms it;
+   * when the re-arm timer runs out the stack is full again and the pilot gets the
+   * controls back. The pilot's input is ignored for the whole trip (see tickDrones).
+   */
+  private tickVampireReturn(drone: InternalDrone, dt: number) {
+    const dx = VAMPIRE_BASE.x - drone.position.x;
+    const dz = VAMPIRE_BASE.z - drone.position.z;
+    const dist = Math.hypot(dx, dz);
+    drone.yaw = Math.atan2(dx, dz);
+    drone.pitch = 0;
+
+    if (dist > VAMPIRE_BASE_RADIUS) {
+      // Cruise home: close on the pad while easing up to the cruise altitude.
+      const ux = dx / dist;
+      const uz = dz / dist;
+      const vy = Math.max(-VAMPIRE_SPEED, Math.min(VAMPIRE_SPEED, (VAMPIRE_CRUISE_ALTITUDE - drone.position.y) * 2));
+      drone.velocity.x = ux * VAMPIRE_SPEED;
+      drone.velocity.y = vy;
+      drone.velocity.z = uz * VAMPIRE_SPEED;
+      drone.position.x += drone.velocity.x * dt;
+      drone.position.y += drone.velocity.y * dt;
+      drone.position.z += drone.velocity.z * dt;
+      return;
+    }
+
+    // Over the pad: settle down onto it and start the re-arm once it touches off.
+    drone.velocity.x = 0;
+    drone.velocity.z = 0;
+    drone.velocity.y = -VAMPIRE_SPEED;
+    drone.position.y += drone.velocity.y * dt;
+    if (drone.position.y <= VAMPIRE_LAUNCH_ALTITUDE) {
+      drone.position.y = VAMPIRE_LAUNCH_ALTITUDE;
+      drone.velocity = { x: 0, y: 0, z: 0 };
+      if (drone.vampireReloadAt === 0) {
+        drone.vampireReloadAt = this.serverTime + VAMPIRE_RELOAD_TIME * 1000;
+        const player = this.players.get(drone.ownerId);
+        if (player) player.vampireReloadAt = drone.vampireReloadAt;
+      } else if (this.serverTime >= drone.vampireReloadAt) {
+        this.reloadVampire(drone);
+      }
+    }
+  }
+
+  /** Hand a re-armed Vampire back to its pilot with a full stack of mini-bombs. */
+  private reloadVampire(drone: InternalDrone) {
+    drone.vampireBombs = VAMPIRE_BOMB_CAPACITY;
+    drone.returning = false;
+    drone.lastDropAt = 0;
+    drone.vampireReloadAt = 0;
+    const player = this.players.get(drone.ownerId);
+    if (player) {
+      player.vampireBombs = VAMPIRE_BOMB_CAPACITY;
+      player.vampireReturning = false;
+      player.vampireReloadAt = 0;
+    }
+  }
+
   // ─── Machine guns ────────────────────────────────────────
   /**
    * Fire every gun a pilot is currently holding the trigger on.
@@ -748,8 +948,15 @@ export class GameRoom extends Room {
     for (const [id, drone] of this.drones) {
       if (!drone.alive) continue;
 
+      // An empty Vampire is on autopilot home to re-arm; the pilot's stick is ignored.
+      if (drone.kind === 'vampire' && drone.returning) {
+        this.tickVampireReturn(drone, dt);
+        continue;
+      }
+
       const input = drone.input;
-      const speed = DRONE_SPEED * (input.boost && this.serverTime > drone.boostCooldownUntil ? DRONE_BOOST_MULTIPLIER : 1);
+      const baseSpeed = drone.kind === 'vampire' ? VAMPIRE_SPEED : DRONE_SPEED;
+      const speed = baseSpeed * (input.boost && this.serverTime > drone.boostCooldownUntil ? DRONE_BOOST_MULTIPLIER : 1);
       const yaw = drone.yaw;
       const pitch = drone.pitch;
 
@@ -787,6 +994,14 @@ export class GameRoom extends Room {
 
     // Trees are solid: a quad that clips a trunk or foliage detonates.
     if (this.checkTreeCollision(drone)) { this.explodeDrone(drone); return; }
+
+    // A Vampire is a bomber, not a kamikaze: it neither detonates on nor damages an
+    // enemy it brushes past — its weapon is the bombs it drops. It still crashes into
+    // solid walls and trees (handled above), so fly it clear of the village.
+    if (drone.kind === 'vampire') {
+      if (contacts > 0) this.explodeDrone(drone);
+      return;
+    }
 
     for (const [, enemy] of this.enemies) {
       if (enemy.dead) continue;
@@ -888,7 +1103,7 @@ export class GameRoom extends Room {
         // flying the quad they already have; the choice only gates what the next
         // launch does.
         const gun = hmgGunOf(msg.weapon);
-        if (msg.weapon === WeaponType.FPV || msg.weapon === WeaponType.MORTAR || gun >= 0) {
+        if (msg.weapon === WeaponType.FPV || msg.weapon === WeaponType.VAMPIRE || msg.weapon === WeaponType.MORTAR || gun >= 0) {
           player.weapon = msg.weapon;
           if (gun >= 0) {
             // Taking over a crew starts from the lay that crew was holding, and
@@ -924,15 +1139,41 @@ export class GameRoom extends Room {
         }
         break;
       case 'launch_drone':
-        // Only the drone station launches: with the tube manned, SPACE is a shell.
+        // Only the drone stations launch: with the tube manned, SPACE is a shell.
+        // The FPV and the Vampire are both flown quads, so both lift off on SPACE.
         if (
-          player.weapon === WeaponType.FPV
+          (player.weapon === WeaponType.FPV || player.weapon === WeaponType.VAMPIRE)
           && player.state === PlayerState.WAITING
           && this.phase === GamePhase.PLAYING
         ) {
-          this.launchDrone(player);
+          if (player.weapon === WeaponType.VAMPIRE) this.launchVampire(player);
+          else this.launchDrone(player);
         }
         break;
+      case 'vampire_drop': {
+        // Release one mini-bomb from the Vampire in the air. Every gate is checked
+        // server-side so a spamming client cannot empty the stack in one frame or
+        // drop below the safe altitude: a bomb left, not on autopilot home, enough
+        // altitude, and the release interval elapsed since the last one.
+        if (
+          player.weapon === WeaponType.VAMPIRE
+          && player.state === PlayerState.PILOTING
+          && this.phase === GamePhase.PLAYING
+          && player.droneId
+        ) {
+          const drone = this.drones.get(player.droneId);
+          if (
+            drone && drone.alive && drone.kind === 'vampire'
+            && !drone.returning
+            && drone.vampireBombs > 0
+            && drone.position.y >= VAMPIRE_MIN_DROP_ALTITUDE
+            && this.serverTime - drone.lastDropAt >= VAMPIRE_DROP_INTERVAL * 1000
+          ) {
+            this.dropBomb(player, drone);
+          }
+        }
+        break;
+      }
       case 'drone_input':
         if (player.state === PlayerState.PILOTING && player.droneId) {
           const drone = this.drones.get(player.droneId);
@@ -964,10 +1205,40 @@ export class GameRoom extends Room {
       launchedAt: this.serverTime, alive: true,
       boostCooldownUntil: 0,
       input: { forward: 0, up: 0, boost: false },
+      kind: 'fpv', vampireBombs: 0, returning: false, lastDropAt: 0, vampireReloadAt: 0,
     };
     this.drones.set(drone.id, drone);
     player.state = PlayerState.PILOTING;
     player.droneId = drone.id;
+  }
+
+  /**
+   * Send a Vampire bomber up off the pad with a full stack of mini-bombs. It lifts
+   * to a safe launch altitude so the first drop is legal the moment the pilot climbs
+   * a touch more, and the bomb state is mirrored onto the player so the HUD can read
+   * the stack without reaching through the drone.
+   */
+  private launchVampire(player: InternalPlayer) {
+    const drone: InternalDrone = {
+      id: `d_${this.idCounter++}`, ownerId: player.id,
+      position: { x: VAMPIRE_BASE.x, y: VAMPIRE_LAUNCH_ALTITUDE, z: VAMPIRE_BASE.z },
+      velocity: { x: 0, y: 0, z: 0 },
+      yaw: Math.random() * Math.PI * 2, pitch: 0,
+      launchedAt: this.serverTime, alive: true,
+      boostCooldownUntil: 0,
+      input: { forward: 0, up: 0, boost: false },
+      kind: 'vampire',
+      vampireBombs: VAMPIRE_BOMB_CAPACITY,
+      returning: false,
+      lastDropAt: 0,
+      vampireReloadAt: 0,
+    };
+    this.drones.set(drone.id, drone);
+    player.state = PlayerState.PILOTING;
+    player.droneId = drone.id;
+    player.vampireBombs = VAMPIRE_BOMB_CAPACITY;
+    player.vampireReturning = false;
+    player.vampireReloadAt = 0;
   }
 
   // ─── Helpers ─────────────────────────────────────────────
@@ -1045,6 +1316,10 @@ export class GameRoom extends Room {
         id: d.id, ownerId: d.ownerId, position: d.position,
         velocity: d.velocity, yaw: d.yaw, pitch: d.pitch,
         launchedAt: d.launchedAt, alive: d.alive,
+        kind: d.kind, vampireBombs: d.vampireBombs, returning: d.returning,
+      })),
+      bombs: Array.from(this.bombs.values()).map(b => ({
+        id: b.id, ownerId: b.ownerId, position: b.position,
       })),
       players: Array.from(this.players.values()).map(p => ({
         id: p.id, name: p.name, state: p.state,
@@ -1053,6 +1328,8 @@ export class GameRoom extends Room {
         weapon: p.weapon, mortarReadyAt: p.mortarReadyAt,
         hmgAmmo: p.hmgAmmo, hmgReloadAt: p.hmgReloadAt,
         manningGun: p.manningGun, hmgYaw: p.hmgYaw, hmgPitch: p.hmgPitch,
+        vampireBombs: p.vampireBombs, vampireReturning: p.vampireReturning,
+        vampireReloadAt: p.vampireReloadAt,
       })),
       serverTime: this.serverTime,
     };

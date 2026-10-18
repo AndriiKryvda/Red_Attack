@@ -13,6 +13,7 @@ import {
 // bolted to the crest of the berm - one per face, numbered clockwise from the north.
 export enum WeaponType {
   FPV = 'fpv',
+  VAMPIRE = 'vampire',
   MORTAR = 'mortar',
   HMG_1 = 'hmg1',
   HMG_2 = 'hmg2',
@@ -23,6 +24,7 @@ export enum WeaponType {
 /** Labels the HUD prints next to each weapon slot. */
 export const WEAPON_LABELS: Record<WeaponType, string> = {
   [WeaponType.FPV]: 'FPV DRONE',
+  [WeaponType.VAMPIRE]: 'VAMPIRE BOMBER',
   [WeaponType.MORTAR]: 'MORTAR',
   [WeaponType.HMG_1]: 'HMG · NORTH FACE',
   [WeaponType.HMG_2]: 'HMG · EAST FACE',

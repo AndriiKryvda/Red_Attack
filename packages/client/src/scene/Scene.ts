@@ -4,11 +4,13 @@ import {
   GameState, EnemyType, PlayerState, ServerEvent, WeaponType,
   clampMortarTarget, MORTAR_POSITION, MORTAR_MUZZLE_HEIGHT,
   hmgGunOf, hmgSeat, hmgDirection,
+  vampireBombFlight, VAMPIRE_MIN_DROP_ALTITUDE,
 } from '@red-attack/shared';
 import { createTerrain } from './Terrain';
 import { createOutpost } from './Outpost';
 import { EnemyRenderer } from './Enemy';
 import { DroneRenderer } from './Drone';
+import { BombRenderer } from './Bomb';
 import { EffectsManager } from './Effects';
 import { StructureRenderer } from './Structures';
 import { MortarView } from './Mortar';
@@ -17,12 +19,21 @@ import { HmgView } from './Hmg';
 import { HmgFx } from './HmgFx';
 import { audio } from '../audio/AudioManager';
 
+// Bomber-sight camera for the Vampire: a camera hung above and behind the aircraft
+// looking steeply down at the ground ahead, so the operator watches the terrain
+// scroll under the drone and sees each mini-bomb fall away to the target.
+const VAM_CAM_HEIGHT = 10;   // metres above the drone
+const VAM_CAM_BACK = 6;      // metres behind the drone
+const VAM_CAM_LEAD = 8;      // metres ahead of the drone the view centres on
+const VAM_CAM_DROP = 20;     // metres below the drone that point sits
+
 export class GameScene {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private enemyRenderer: EnemyRenderer;
   private droneRenderer: DroneRenderer;
+  private bombRenderer: BombRenderer;
   private effects: EffectsManager;
   private structureRenderer: StructureRenderer;
   private mortar: MortarView;
@@ -108,6 +119,7 @@ export class GameScene {
     // Entity renderers
     this.enemyRenderer = new EnemyRenderer(this.scene);
     this.droneRenderer = new DroneRenderer(this.scene);
+    this.bombRenderer = new BombRenderer(this.scene);
     this.effects = new EffectsManager(this.scene);
     this.structureRenderer = new StructureRenderer(this.scene);
 
@@ -176,6 +188,9 @@ export class GameScene {
       this.camera.position,
       (x, y, z, color) => this.effects.spawnTrailPuff(x, y, z, color),
     );
+
+    // The Vampire's mini-bombs in the air, drawn straight from the synced positions.
+    this.bombRenderer.sync(state.bombs ?? []);
 
     // Process events (explosions etc)
     for (const ev of events) {
@@ -277,15 +292,48 @@ export class GameScene {
     // the thing the pilot just did and is the reason the view left the fort.
     const mortarCam = this.mortarFx.cameraShot(this.localPlayerId);
     this.setFov(manningGun >= 0 ? 55 : 70);
+    // The impact reticle belongs only to the Vampire pilot; hide it for every other
+    // view and let the Vampire branch below put it back on for its own camera.
+    this.bombRenderer.updateImpact(0, 0, false, false);
     if (piloting && myDrone) {
-      // FPV drone camera
-      this.camera.position.set(myDrone.position.x, myDrone.position.y, myDrone.position.z);
-      const yaw = myDrone.yaw;
-      const pitch = myDrone.pitch;
-      const lookX = myDrone.position.x + Math.sin(yaw) * Math.cos(pitch) * 10;
-      const lookY = myDrone.position.y + Math.sin(pitch) * 10;
-      const lookZ = myDrone.position.z + Math.cos(yaw) * Math.cos(pitch) * 10;
-      this.camera.lookAt(lookX, lookY, lookZ);
+      if (myDrone.kind === 'vampire') {
+        // Bomber sight: hang the camera above and behind the Vampire and look
+        // steeply down at the ground ahead of it, so the operator sees the terrain
+        // scroll under the aircraft and watches each mini-bomb fall to the target.
+        // The view turns with the drone's yaw; the nose pitch is ignored (fixed angle).
+        const yaw = myDrone.yaw;
+        const fx = Math.sin(yaw), fz = Math.cos(yaw);
+        this.camera.position.set(
+          myDrone.position.x - fx * VAM_CAM_BACK,
+          myDrone.position.y + VAM_CAM_HEIGHT,
+          myDrone.position.z - fz * VAM_CAM_BACK,
+        );
+        this.camera.lookAt(
+          myDrone.position.x + fx * VAM_CAM_LEAD,
+          myDrone.position.y - VAM_CAM_DROP,
+          myDrone.position.z + fz * VAM_CAM_LEAD,
+        );
+        // Predict where a bomb released right now lands: it keeps the bomber's
+        // horizontal velocity and free-falls from the current altitude, so the
+        // ground reticle tracks the blast footprint ahead of the aircraft.
+        const alt = Math.max(0, myDrone.position.y);
+        const flight = vampireBombFlight(alt);
+        const landX = myDrone.position.x + myDrone.velocity.x * flight;
+        const landZ = myDrone.position.z + myDrone.velocity.z * flight;
+        const canDrop = alt >= VAMPIRE_MIN_DROP_ALTITUDE
+          && (myDrone.vampireBombs ?? 0) > 0
+          && !myDrone.returning;
+        this.bombRenderer.updateImpact(landX, landZ, canDrop, true);
+      } else {
+        // FPV drone camera
+        this.camera.position.set(myDrone.position.x, myDrone.position.y, myDrone.position.z);
+        const yaw = myDrone.yaw;
+        const pitch = myDrone.pitch;
+        const lookX = myDrone.position.x + Math.sin(yaw) * Math.cos(pitch) * 10;
+        const lookY = myDrone.position.y + Math.sin(pitch) * 10;
+        const lookZ = myDrone.position.z + Math.cos(yaw) * Math.cos(pitch) * 10;
+        this.camera.lookAt(lookX, lookY, lookZ);
+      }
     } else if (manningGun >= 0) {
       // At the gun: stand behind the spade grips and look down the barrel, with the
       // kick of the belt shaking the view along with the gun.

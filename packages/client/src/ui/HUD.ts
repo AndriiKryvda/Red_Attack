@@ -22,6 +22,8 @@ export class HUD {
   private wpMortar: HTMLElement;
   private wpFpvState: HTMLElement;
   private wpMortarState: HTMLElement;
+  private wpVampire: HTMLElement;
+  private wpVampireState: HTMLElement;
   /** One row and one state cell per machine gun, in the order the nests are numbered. */
   private wpHmg: HTMLElement[] = [];
   private wpHmgState: HTMLElement[] = [];
@@ -51,6 +53,8 @@ export class HUD {
     this.wpMortar = document.getElementById('wp-mortar')!;
     this.wpFpvState = document.getElementById('wp-fpv-state')!;
     this.wpMortarState = document.getElementById('wp-mortar-state')!;
+    this.wpVampire = document.getElementById('wp-vampire')!;
+    this.wpVampireState = document.getElementById('wp-vampire-state')!;
     // The four gun rows are looked up rather than written out: the panel and the
     // nests are numbered the same way, 3 to 6.
     for (let i = 1; i <= HMG_NESTS.length; i++) {
@@ -110,6 +114,8 @@ export class HUD {
       const droneWait = player.state === PlayerState.COOLDOWN
         ? Math.max(0, Math.ceil((player.cooldownUntil - state.serverTime) / 1000))
         : 0;
+      const vampireRearm = Math.max(
+        0, Math.ceil(((player.vampireReloadAt ?? 0) - state.serverTime) / 1000));
       if (player.state === PlayerState.PILOTING) {
         this.droneStatus.textContent = '🛩️ In Flight';
         this.crosshair.classList.add('show');
@@ -133,7 +139,13 @@ export class HUD {
         this.droneStatus.textContent = '✅ Press SPACE to launch';
         this.crosshair.classList.remove('show');
       }
-      this.updateWeaponPanel(player, mortarWait, droneWait, hmgGun, hmgWait);
+      // A Vampire in the air reports its own bomb stack rather than a plain "In Flight".
+      if (player.state === PlayerState.PILOTING && (player.weapon ?? WeaponType.FPV) === WeaponType.VAMPIRE) {
+        this.droneStatus.textContent = player.vampireReturning
+          ? (vampireRearm > 0 ? `Returning · rearm ${vampireRearm}s` : 'Returning to base')
+          : `${player.vampireBombs ?? 0} bombs · LMB to drop`;
+      }
+      this.updateWeaponPanel(player, mortarWait, droneWait, hmgGun, hmgWait, vampireRearm);
       this.scoreDisplay.textContent = `Score: ${player.score}`;
 
       // Key guide: pulse the Space row while a launch is available.
@@ -162,19 +174,32 @@ export class HUD {
   /** The weapon rack: which station is manned, and what each one is doing. */
   private updateWeaponPanel(
     player: PlayerData, mortarWait: number, droneWait: number,
-    hmgGun: number, hmgWait: number[],
+    hmgGun: number, hmgWait: number[], vampireRearm: number,
   ) {
     if (!this.weaponPanel) return;
     const weapon = player.weapon ?? WeaponType.FPV;
+    const piloting = player.state === PlayerState.PILOTING;
     const fpvOn = weapon === WeaponType.FPV;
+    const vampireOn = weapon === WeaponType.VAMPIRE;
     this.wpFpv.classList.toggle('on', fpvOn);
     this.wpMortar.classList.toggle('on', weapon === WeaponType.MORTAR);
-    this.wpFpvState.textContent = player.state === PlayerState.PILOTING
+    // The FPV row only claims "IN FLIGHT" when it is the FPV actually flying; a
+    // Vampire in the air belongs to its own row below, not this one.
+    this.wpFpvState.textContent = (fpvOn && piloting)
       ? 'IN FLIGHT'
-      : (droneWait > 0 ? `RELOAD ${droneWait}s` : 'READY');
+      : (fpvOn && droneWait > 0 ? `RELOAD ${droneWait}s` : 'READY');
     this.wpMortarState.textContent = mortarWait > 0 ? `RELOAD ${mortarWait}s` : 'READY';
-    this.wpFpv.classList.toggle('cool', droneWait > 0);
+    this.wpFpv.classList.toggle('cool', fpvOn && droneWait > 0);
     this.wpMortar.classList.toggle('cool', mortarWait > 0);
+    // The Vampire row: how many mini-bombs are left in the stack, or what the
+    // autopilot is doing on the way home to re-arm.
+    this.wpVampire.classList.toggle('on', vampireOn);
+    this.wpVampire.classList.toggle('cool', vampireOn && !!player.vampireReturning);
+    this.wpVampireState.textContent = (!vampireOn || !piloting)
+      ? 'READY'
+      : player.vampireReturning
+        ? (vampireRearm > 0 ? `REARM ${vampireRearm}s` : 'RETURNING')
+        : `${player.vampireBombs ?? 0} BOMBS`;
     // The four guns: whose trigger is manned, and what is left in each belt. An
     // empty one shows the swap countdown instead of a number.
     for (let i = 0; i < this.wpHmg.length; i++) {

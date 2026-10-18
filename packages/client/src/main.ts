@@ -40,7 +40,7 @@ function localPlayer() {
  * tube, then the four machine guns along the berm.
  */
 const WEAPON_CYCLE: WeaponType[] = [
-  WeaponType.FPV, WeaponType.MORTAR, ...HMG_WEAPONS,
+  WeaponType.FPV, WeaponType.VAMPIRE, WeaponType.MORTAR, ...HMG_WEAPONS,
 ];
 
 /**
@@ -106,6 +106,9 @@ input.onLaunch = () => { fireWeapon(); };
 input.onFireMouse = () => {
   if (localPlayer()?.weapon === WeaponType.MORTAR) fireWeapon();
 };
+// While manning the Vampire, a left click releases one mini-bomb; the server paces
+// the stack and refuses a drop that is too low, empty or already homing home.
+input.onDropBomb = () => { network.sendVampireDrop(); };
 input.onSelfDestruct = () => { network.sendSelfDestruct(); };
 input.onToggleKeysGuide = () => { hud.toggleKeysGuide(); };
 input.onSelectWeapon = (weapon) => { selectWeapon(weapon); };
@@ -214,7 +217,17 @@ function gameLoop(time: number) {
 
   if (gameStarted) {
     // Send continuous input to server (rate-limited internally)
-    network.sendInput(input.getState());
+    const me = localPlayer();
+    // While flying a Vampire the left mouse button is the bomb release, not a boost.
+    input.setVampireMode(!!me && me.state === PlayerState.PILOTING && me.weapon === WeaponType.VAMPIRE);
+    const inputState = input.getState();
+    network.sendInput(inputState);
+    // A Vampire pilot holding F releases mini-bombs; the server paces the stack and
+    // refuses a drop that is too low, empty, or on autopilot home, so the client just
+    // keeps saying "still dropping" while the key is down. (LMB drops one per click.)
+    if (inputState.bombDrop && me?.weapon === WeaponType.VAMPIRE) {
+      network.sendVampireDrop();
+    }
     sendHmgInput();
   }
 

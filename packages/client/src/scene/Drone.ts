@@ -19,6 +19,14 @@ const PROP_SPIN = 55;
 const MOTOR_OFFSET = 0.40;
 const PROP_REACH = 0.335;
 
+// Octocopter layout for the Vampire bomber: eight motors evenly around a circle
+// instead of four on the diagonals, so it can lift the heavier bomb load. The
+// whole airframe is then scaled up so a bomber reads as a big, heavy aircraft
+// next to a one-hit FPV quad (visual only — the server's hit radius is separate).
+const OCTO_MOTOR_COUNT = 8;
+const OCTO_MOTOR_OFFSET = 0.62;
+const VAMPIRE_SCALE = 2;
+
 /**
  * The colour a pilot wears: the quad, its callsign tag and its smoke trail all
  * take it from here. Pilots are coloured by the seat they took in the room —
@@ -49,7 +57,6 @@ interface DroneVisual {
   lastTrail: number;
   props: PropRef[];
 }
-
 export class DroneRenderer {
   private scene: THREE.Scene;
   private meshes: Map<string, DroneVisual> = new Map();
@@ -83,9 +90,12 @@ export class DroneRenderer {
       let vis = this.meshes.get(drone.id);
       if (!vis) {
         const color = colorForOwner(drone.ownerId, seats[drone.ownerId]);
-        const built = this.createDroneMesh(color, isOwn);
+        const built = this.createDroneMesh(color, isOwn, drone.kind === 'vampire');
         const label = isOwn ? null : this.createLabel(names[drone.ownerId] || 'PILOT', color);
         if (label) built.group.add(label);
+        // A Vampire carries its mini-bombs slung under the belly, so a bomber reads
+        // as one from the ground instead of looking like another one-hit FPV quad.
+        if (drone.kind === 'vampire') built.group.add(this.createBombBay());
         this.scene.add(built.group);
         vis = { group: built.group, label, color, lastTrail: 0, props: built.props };
         this.meshes.set(drone.id, vis);
@@ -98,8 +108,10 @@ export class DroneRenderer {
 
       // The pilot's camera sits inside their own quad, so hide that mesh from
       // its own pilot (no frame or props through the lens). Teammates still see
-      // the full quad with its spinning propellers.
-      group.visible = !isOwn;
+      // the full quad with its spinning propellers. The Vampire is the exception:
+      // its operator flies from a camera hung above and behind, so it keeps its own
+      // bomber in view as a reference and watches bombs leave the belly.
+      group.visible = !isOwn || drone.kind === 'vampire';
 
       // Keep the props spinning: frame-rate independent, alternating direction.
       for (const p of vis.props) p.obj.rotation.y = p.phase + p.dir * now * PROP_SPIN;
@@ -125,6 +137,22 @@ export class DroneRenderer {
         this.meshes.delete(id);
       }
     }
+  }
+
+  /**
+   * A pair of mini-bombs slung under a Vampire's belly. Built fresh per drone (not
+   * shared) so the per-drone dispose in sync() can free them with the rest of the mesh.
+   */
+  private createBombBay(): THREE.Group {
+    const group = new THREE.Group();
+    const mat = standardMaterial('metal', { color: 0x2a2d33, metalness: 0.6, roughness: 0.5 });
+    for (const x of [-0.08, 0.08]) {
+      const bomb = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.16, 3, 6), mat);
+      bomb.rotation.x = Math.PI / 2;
+      bomb.position.set(x, -0.12, 0);
+      group.add(bomb);
+    }
+    return group;
   }
 
   private createLabel(text: string, color: number): THREE.Sprite {
@@ -178,7 +206,9 @@ export class DroneRenderer {
    * VTX antenna at the rear. Nothing here is a fixed wing — every bit of lift
    * comes from a spinning prop, which is what an FPV pilot expects to see.
    */
-  private createDroneMesh(accent: number, plain: boolean): { group: THREE.Group; props: PropRef[] } {
+  private createDroneMesh(
+    accent: number, plain: boolean, octo = false,
+  ): { group: THREE.Group; props: PropRef[] } {
     const group = new THREE.Group();
     const props: PropRef[] = [];
 
@@ -214,22 +244,48 @@ export class DroneRenderer {
     strap.position.y = 0.222;
     group.add(strap);
 
-    // -- Arms, motors and propellers on the four diagonals --------------------
-    const armGeo = new THREE.BoxGeometry(0.075, 0.04, 0.46);
+    // A heavy bomber carries a deeper fuselage to hang its bomb rack from, so the
+    // octocopter gets a solid belly box the FPV quad does not need.
+    if (octo) {
+      const belly = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.62), carbon);
+      belly.position.y = -0.05;
+      group.add(belly);
+    }
+
+    // -- Arms, motors and propellers ------------------------------------------
+    // The FPV quad puts four motors on the diagonals; the Vampire is an octocopter
+    // with eight motors evenly around a circle. The octo's props are a touch
+    // shorter so eight of them around the ring do not overlap each other.
+    const propReach = octo ? 0.26 : PROP_REACH;
+    const armLen = octo ? OCTO_MOTOR_OFFSET + 0.06 : 0.46;
+    const motorPositions: { x: number; z: number; dir: number }[] = [];
+    if (octo) {
+      for (let k = 0; k < OCTO_MOTOR_COUNT; k++) {
+        const a = (k / OCTO_MOTOR_COUNT) * Math.PI * 2;
+        motorPositions.push({
+          x: Math.sin(a) * OCTO_MOTOR_OFFSET,
+          z: Math.cos(a) * OCTO_MOTOR_OFFSET,
+          dir: k % 2 === 0 ? 1 : -1, // neighbours oppose, like a real octocopter
+        });
+      }
+    } else {
+      for (const [sx, sz] of [[1, 1], [-1, -1], [1, -1], [-1, 1]] as const) {
+        motorPositions.push({ x: sx * MOTOR_OFFSET, z: sz * MOTOR_OFFSET, dir: sx * sz });
+      }
+    }
+
+    const armGeo = new THREE.BoxGeometry(0.075, 0.04, armLen);
     const statorGeo = new THREE.CylinderGeometry(0.072, 0.078, 0.055, 12);
     const bellGeo = new THREE.CylinderGeometry(0.058, 0.064, 0.05, 12);
     const nutGeo = new THREE.CylinderGeometry(0.016, 0.02, 0.03, 6);
     const hubGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.03, 10);
-    const bladeGeo = new THREE.BoxGeometry(0.07, 0.012, PROP_REACH - 0.035);
-    const blurGeo = new THREE.CylinderGeometry(PROP_REACH, PROP_REACH, 0.004, 20);
+    const bladeGeo = new THREE.BoxGeometry(0.07, 0.012, propReach - 0.035);
+    const blurGeo = new THREE.CylinderGeometry(propReach, propReach, 0.004, 20);
     const blurMat = new THREE.MeshBasicMaterial({
       color: plain ? 0x9aa4b0 : accent, transparent: true, opacity: 0.1, depthWrite: false,
     });
 
-    for (const [sx, sz] of [[1, 1], [-1, -1], [1, -1], [-1, 1]] as const) {
-      const x = sx * MOTOR_OFFSET;
-      const z = sz * MOTOR_OFFSET;
-      const dir = sx * sz; // diagonal motors share a direction, neighbours oppose
+    for (const { x, z, dir } of motorPositions) {
 
       const arm = new THREE.Mesh(armGeo, carbon);
       arm.position.set(x * 0.5, 0.005, z * 0.5);
@@ -254,7 +310,7 @@ export class DroneRenderer {
       prop.add(new THREE.Mesh(hubGeo, darkMetal));
       for (const side of [-1, 1]) {
         const blade = new THREE.Mesh(bladeGeo, plain ? carbon : accentMat);
-        blade.position.z = side * (0.035 + (PROP_REACH - 0.035) / 2);
+        blade.position.z = side * (0.035 + (propReach - 0.035) / 2);
         blade.rotation.z = 0.24 * dir;
         prop.add(blade);
       }
@@ -323,6 +379,10 @@ export class DroneRenderer {
         child.castShadow = !(child.material as THREE.Material).transparent;
       }
     });
+
+    // The Vampire is a heavy bomber: scale the whole airframe (and the bomb bay
+    // hung from it) up so it towers over a one-hit FPV quad.
+    if (octo) group.scale.setScalar(VAMPIRE_SCALE);
 
     return { group, props };
   }

@@ -12,6 +12,9 @@ export class NetworkClient {
   /** Machine gun lay: a little quicker than drone input so a release lands fast. */
   private hmgRate: number = 0;
   private readonly HMG_INTERVAL = 40;
+  /** Vampire bomb release: held open, but no need to shout faster than the server paces it. */
+  private vampireDropRate: number = 0;
+  private readonly VAMPIRE_DROP_INTERVAL = 120;
   private _sessionId: string = '';
 
   constructor() {
@@ -82,6 +85,19 @@ export class NetworkClient {
   /** Drop a shell on a spot of the field; the server clamps it into the ring of fire. */
   sendMortarFire(x: number, z: number) {
     if (this.room) this.room.send('mortar_fire', { type: 'mortar_fire', x, z });
+  }
+
+  /**
+   * Release one mini-bomb from the Vampire in the air. Held open the way drone input
+   * is, but lightly rate-limited: the server is the one that paces the stack at its own
+   * drop interval and refuses a drop that is too low or empty, so the client only has
+   * to keep saying "still dropping" while the key is down.
+   */
+  sendVampireDrop() {
+    const now = performance.now();
+    if (now - this.vampireDropRate < this.VAMPIRE_DROP_INTERVAL) return;
+    this.vampireDropRate = now;
+    if (this.room) this.room.send('vampire_drop', { type: 'vampire_drop' });
   }
 
   /** Rate-limited continuous drone input */

@@ -96,6 +96,20 @@ export interface DroneData {
   pitch: number;
   launchedAt: number;    // timestamp
   alive: boolean;
+  /** Which bomber this quad is: a one-hit FPV or a bomb-carrying Vampire. */
+  kind?: 'fpv' | 'vampire';
+  /** Mini-bombs left in a Vampire's stack (only set when `kind` is 'vampire'). */
+  vampireBombs?: number;
+  /** True while an empty Vampire is flying itself home to re-arm (input ignored). */
+  returning?: boolean;
+}
+
+// ─── Vampire mini-bomb ─────────────────────────────────────
+/** One mini-bomb in the air under a Vampire, resolved in closed form on the tick. */
+export interface BombData {
+  id: string;
+  ownerId: string;
+  position: Vec3;
 }
 
 // ─── Player ────────────────────────────────────────────────
@@ -124,6 +138,15 @@ export interface PlayerData {
   /** Lay of the gun the pilot is manning: world yaw, and elevation inside its limits. */
   hmgYaw: number;
   hmgPitch: number;
+  /**
+   * Vampire bomber state. `vampireBombs` is the stack the pilot in the cockpit is
+   * carrying (mirrored from the drone so the HUD can read it off the player),
+   * `vampireReturning` says the empty bomber is on autopilot home, and
+   * `vampireReloadAt` is the timestamp the crew finishes re-arming.
+   */
+  vampireBombs: number;
+  vampireReturning: boolean;
+  vampireReloadAt: number;
 }
 
 // ─── Horde ───────────────────────────────────────────
@@ -145,6 +168,8 @@ export interface GameState {
   structures: StructureData[];   // village buildings and parked cars (static)
 
   drones: DroneData[];
+  /** Mini-bombs currently falling from the Vampire bombers (state-driven render). */
+  bombs: BombData[];
   players: PlayerData[];
   serverTime: number;
 }
@@ -191,6 +216,16 @@ export interface MortarFireMsg {
 }
 
 /**
+ * Release one mini-bomb from the Vampire the pilot is flying. There is no aim
+ * payload: the bomb simply lets go of the aircraft where it flies, and the server
+ * decides whether the drop is legal (enough altitude, a bomb left, the interval
+ * elapsed) so a spamming client cannot empty the stack in one frame.
+ */
+export interface VampireDropMsg {
+  type: 'vampire_drop';
+}
+
+/**
  * The lay of a manned machine gun and whether the trigger is under. The client
  * streams this the way it streams drone input and the server decides when a round
  * actually leaves the barrel, so the belt, the cyclic rate and the hits stay
@@ -215,6 +250,7 @@ export type ClientMessage =
   | PlayerNameMsg
   | SelectWeaponMsg
   | MortarFireMsg
+  | VampireDropMsg
   | HmgInputMsg;
 
 // ─── Server → Client Events ───────────────────────────────

@@ -1,6 +1,6 @@
 # 🔴 Red Attack
 
-A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an escalating horde for 20 minutes. Three weapons come free with the fort: fly a kamikaze drone in first-person view for precision work, stand at the tube mortar and put shells across the middle of the field, or run one of the four heavy machine guns on the berm. A fourth — the Vampire mini-bomber — sits in the armory until a pilot buys it out of the credits his own kills pay out (see [Credits and the Armory](#credits-and-the-armory)). The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
+A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an escalating horde for 20 minutes. Three weapons come free with the fort: fly a kamikaze drone in first-person view for precision work, stand at the tube mortar and put shells across the middle of the field, or run one of the four heavy machine guns on the berm. A fourth — the Vampire mini-bomber — sits in the armory until a pilot buys it out of the credits his own kills pay out (see [Credits and the Armory](#credits-and-the-armory)). The armory also sells something that is not a station at all: a hundred and twenty mines in the dirt around the wire, bought on key `8` for 500 credits ([The Mine Field](#the-mine-field)). The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
 
 ## Tech Stack
 
@@ -30,6 +30,7 @@ red-attack/
 │   │       │                #   Structures.ts — client side of the village state
 │   │       │                #   VehicleModels.ts — horde vehicles
 │   │       │                #   Bomb.ts — the Vampire's mini-bombs in the air
+│   │       │                #   Mines.ts — the mine field in the dirt around the fort
 │   │       ├── ui/          # HUD overlay + the armory panel
 │   │       └── main.ts      # Game loop
 │   ├── server/          # Colyseus game server
@@ -42,6 +43,7 @@ red-attack/
 │           ├── constants.ts
 │           ├── mortar.ts      # weapon types, range clamp, shared ballistics
 │           ├── vampire.ts     # bomber stats: bomb stack, altitude band, re-arm
+│           ├── mines.ts       # the mine field: six rings, trigger radius, blast
 │           ├── hmg.ts         # the four guns, their belts and their arc of fire
 │           ├── economy.ts     # SHOP_CATALOG, credit payouts, default loadout
 │           ├── structures.ts  # STRUCTURE_SPECS, village layout, spawn edges
@@ -90,7 +92,9 @@ manned station does — launch the quad, send a shell at wherever the fort view 
 pointing, run the belt of the gun you are standing at, or put the bomber off the pad.
 With the tube manned, the left mouse button is a second trigger for the same shell; on
 a machine gun it is the same held trigger as `Space`; on the bomber it releases a
-mini-bomb, as does `F`. `B` raises the armory over the top of all of it.
+mini-bomb, as does `F`. `B` raises the armory over the top of all of it. `8` is the one
+key that buys instead of manning: it spends 500 credits on a mine field in the dirt around
+the wire ([The Mine Field](#the-mine-field)).
 
 ### Keys
 
@@ -99,6 +103,7 @@ mini-bomb, as does `F`. `B` raises the armory over the top of all of it.
 | **1 / 2** | Man the FPV drone pad / man the tube mortar |
 | **3 / 4 / 5 / 6** | Man the north / east / south / west machine gun |
 | **7** | Man the Vampire bomber — a dead key until it is bought, and the key that buys it while the armory is open |
+| **8** | Buy a mine field for 500 credits — a hundred and twenty mines ring the fort; the armory's mine field row, too |
 | **Tab** | Walk to the next station you hold (drone → bomber → mortar → the four guns → drone) |
 | **B** | Open / close the armory — spend earned credits on weapons |
 | **W / S** | Forward / backward thrust (in drone's facing direction) |
@@ -224,6 +229,53 @@ release interval and the re-arm clock all live on the room
 `packages/server/src/rooms/GameRoom.ts`), and the client only streams the same stick it
 streams for the quad. The tuning numbers sit in `packages/shared/src/vampire.ts`.
 
+### The Mine Field
+
+The armory's one consumable, on key `8` for 500 credits. There is no station to man and
+nothing to fly: pay the sappers, a hundred and twenty mines go into the dirt around the
+fort, and the pilot's involvement ends there. They go down in six rings evenly spaced
+between 16 m and 26 m out, every other ring turned half a step so the rings interlock —
+a mine every couple of metres on the way in, across every direction the horde can walk in
+from. The inner ring clears the fence line and the four gun nests, so no mine is buried
+under a gunner's feet; the outer one stays inside the mortar's 30 m minimum range, so the
+tube and the field never work the same ground.
+
+1. **Buy** — `8` spends the credits with the armory shut, and buys the row with the panel
+   open. Until then the weapon rack prints `BUY · 500` beside the key; once every hole in
+   the belt is occupied it prints `FULL`, because there would be nothing left to bury.
+2. **They arm** — a mine goes live one second after it is buried. That is the crew's time
+   to get clear, and it stops a field bought with enemies already standing on the spots
+   from setting the whole belt off at once.
+3. **It kills** — anything live that comes within 2.5 m of a live mine sets it off: a 6 m
+   blast dealing 6 damage, the same figure a mortar shell carries, so a mine kills
+   anything the horde sends outright, the tank included. The pilot who paid for the field
+   keeps the credit and the multi-kill bonus for everything it takes with him.
+4. **It is spent, then refilled** — a mine is a buried charge, not a turret. It disappears
+   the instant it goes off, whether or not the blast killed anything, so the belt thins out
+   as the horde walks across it. The holes stay in the ground: the next 500 buries a mine in
+   every empty one and leaves the waiting mines exactly as they are — same owner, same arming
+   clock — so a field is topped back up to a full hundred and twenty instead of doubled up on
+   itself. Nothing expires on its own, and a belt that is already full is refused rather than
+   sold again at full price.
+
+What it is not: permanent. A hundred and twenty mines stops a column stone dead, but every
+mine is spent the instant it trips, so a thick wave eats the belt from the outside in and
+the answer to a cleared field is the next 500 credits. And a field is laid around our own
+fort, so mines never touch the village — friendly scenery is not a target, and no mine has
+ever scored on a Russian house.
+The belt is one shared set of holes around the fort, and each mine in it belongs to whoever
+paid for that mine — so a pilot who tops up holes somebody else dug scores the kills his own
+mines take. A mine stays in the ground if the pilot who buried it leaves: it keeps killing,
+it simply stops scoring for anyone.
+
+The field is server-owned end to end — `layMinefield`, `tickMines` and `detonateMine` in
+`packages/server/src/rooms/GameRoom.ts` decide where the mines go, when one is walked over
+and who gets the kill — and the client only draws what the state sends back
+(`packages/client/src/scene/Mines.ts`), each mine a dark disc with a blinking eye — and,
+once a field has been used down past two dozen, a faint ring showing the ground each
+remaining mine actually covers. The layout and the tuning numbers — ring radii, trigger
+radius, arming time, blast and damage — sit in `packages/shared/src/mines.ts`.
+
 ## Credits and the Armory
 
 Score records what a pilot did; credits are what he can spend. Every point of score also
@@ -234,14 +286,16 @@ is.
 
 Press **`B`** and the armory opens over the middle of the screen: the catalogue with a
 price and a line of copy each, what is in the purse, and a status on every row —
-`AFFORDABLE`, `SHORT <n>` or `OWNED`. The number key printed on a row buys it, so `7`
-buys the Vampire. Gameplay input goes completely quiet while the panel is up — held keys
+`AFFORDABLE`, `SHORT <n>`, `OWNED`, or `FIELD FULL` on the mine field once every hole in the
+belt is already mined. The number key printed on a row buys it, so `7`
+buys the Vampire and `8` refills the mine field. Gameplay input goes completely quiet while the panel is up — held keys
 and the mouse are flushed, so nothing changes stations or drops ordnance behind your
 back — and `B` closes it again. A purchase that goes through closes it for you.
 
 | Item | Key | Cost | What it buys |
 |------|-----|------|--------------|
 | Vampire bomber | `7` | 300 | The bomber on key `7`, for the rest of the run |
+| Mine field | `8` | 500 | Fills every empty hole in the fort's mine belt, back up to a hundred and twenty mines — a consumable, so it can be bought again whenever the horde has walked some off |
 
 **The server decides every transaction.** A purchase request names a catalogue row and
 nothing else; the price comes from the server's own copy of the catalogue, so a tampered
@@ -258,6 +312,12 @@ A refusal goes to the pilot who asked and to nobody else, and says why:
 | `✖ VAMPIRE BOMBER: ALREADY YOURS` | Already bought; there is no second one |
 | `✖ VAMPIRE BOMBER: ARMORY CLOSED` | Nothing changes hands before the fight starts or after the fort falls |
 | `✖ VAMPIRE BOMBER: LOCKED · 300` | The station key was pressed with the armory shut — this is what a locked station feels like |
+| `✖ MINE FIELD: FIELD FULL · NOTHING TO FILL` | Every hole in the mine belt is already occupied, so there is nothing this purchase could bury |
+
+A consumable row never says `ALREADY YOURS`. The mine field has no station behind it, so it
+stays `AFFORDABLE` for as long as any hole in the belt is empty; once none is, the armory
+refuses it as `FIELD FULL` instead of taking the credits for a field that would not change by
+a single mine.
 
 A purchase that succeeds is announced to the whole room, so the other pilots hear that
 somebody just walked out with a bomber, and the row flips to `OWNED` on every screen at
@@ -267,8 +327,12 @@ own Vampire, and one pilot's purchase does not hand a bomber to his teammates.
 The whole shop is data in `packages/shared/src/economy.ts`. A new weapon is one row in
 `SHOP_CATALOG` — price, the station it buys, a label, a line of copy, and the key that
 buys it — and the server, the HUD and the hotkeys all read that row, so nothing else has
-to change. `STARTING_CREDITS` sets what a pilot is handed before he has killed anything
-(0, so the first bomber is earned) and `CREDIT_PAYOUT` sets the exchange rate between the
+to change. A row whose station is `null` is a consumable: it can never be `OWNED`, and the
+room decides what the money actually buys (a mine field is refilled in `layMinefield` the moment
+the purchase clears). `STARTING_CREDITS` is a table keyed by difficulty: Easy hands a pilot
+1,000 credits before he has killed anything — enough to walk in and buy everything the
+armory sells on the spot — while Medium and Hard open at nothing and make him earn the
+bomber out of the horde. `CREDIT_PAYOUT` sets the exchange rate between the
 two ledgers.
 
 ## Multiplayer
@@ -281,6 +345,10 @@ two ledgers.
 - Every pilot sees the other pilots' drones in the air (colour-coded per player, with a callsign tag and a smoke trail).
 - Weapons are per pilot: switching between the quad and the mortar, and each mortar reload, is private to that pilot, while every shell, crater and kill is shared. Only the shooter's own camera leaves the fort to watch a shell land.
 - So is the purse: credits and everything bought at the armory belong to the pilot who earned and paid for them, and reset when a new game starts.
+- A mine field follows the same rule with one exception: each mine scores for the pilot who
+  paid for it, but it stays in the ground and keeps killing after he disconnects — the mines
+  belong to the fort once they are buried, and the holes they leave are what the next 500
+  refills.
 
 ## Game Mechanics
 
@@ -298,11 +366,13 @@ two ledgers.
 | Vampire bomber | 13 m/s, flown in a clamped 20–80 m band, climbs and sinks at 10 m/s |
 | Vampire mini-bomb | 5 m blast at 3 damage, five per sortie, no more than one every 0.6 s |
 | Vampire re-arm | 6 s on the pad, flown home by its own autopilot |
-| Starting credits | 0 — every credit is earned out of the horde |
+| Mine field | 500 credits — refills the belt of 120 holes in six rings evenly spaced between 16 m and 26 m out, live 1 s after burial; a full belt is not sold again |
+| Mine | 2.5 m trigger, 6 m blast at 6 damage — kills anything it catches, tank included, and is spent when it goes off |
+| Starting credits | Easy 1,000 — enough to buy the whole armory up front; Medium and Hard 0, every credit earned out of the horde |
 | Credit payout | 1 credit per point of score, on a ledger separate from the score itself |
-| Armory | `B` — the Vampire bomber is 300 credits, and unlocks for the pilot who pays |
+| Armory | `B` — the Vampire bomber is 300 credits and unlocks for the pilot who pays; a mine field is 500 and refills the belt whenever the horde has emptied holes in it |
 | Horde spawn rate | 0.35 → 2.0 enemies/s (ramps over 15 min, ×players) |
-| Difficulty | Easy / Medium / Hard — scales the horde to 25% / 50% / 100% of the hard spawn rate and live enemy cap (Easy is the default) |
+| Difficulty | Easy / Medium / Hard — scales the horde to 25% / 50% / 100% of the hard spawn rate and live enemy cap, and Easy opens the purse at 1,000 credits (Easy is the default) |
 | Threat level | +1 every 60 s |
 | Victory condition | Survive 20 minutes |
 | Spawn directions | weighted to the village: 40% north, 40% east, 10% west, 10% south (out on the map border, 142–149 m from the fort) |

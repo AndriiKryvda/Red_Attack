@@ -6,7 +6,7 @@ import { audio } from './audio/AudioManager';
 import {
   ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS, WeaponType, PlayerState,
   HMG_NESTS, HMG_WEAPONS, hmgGunOf, Difficulty,
-  ShopItemSpec, shopItemByKey, shopItemByHotkey, shopItemFor, weaponIsUnlocked, defaultLoadout,
+  ShopItem, ShopItemSpec, shopItemByKey, shopItemByHotkey, shopItemFor, weaponIsUnlocked, defaultLoadout,
 } from '@red-attack/shared';
 
 // ─── Bootstrap ─────────────────────────────────────────────
@@ -162,6 +162,14 @@ input.onShopBuy = (hotkey) => {
   if (spec) buy(spec);
 };
 hud.onShopBuy = (spec) => { buy(spec); };
+
+// 8 on the weapon panel buys a mine field without opening the armory. It goes through
+// the same row the panel sells, so the price, the receipt and the refusal all read the
+// same way whichever key spent the credits.
+input.onBuyMineField = () => {
+  const spec = shopItemByKey(ShopItem.MINEFIELD);
+  if (spec) buy(spec);
+};
 
 // The browser drops the mouse capture whenever the window loses focus; the
 // InputManager wins it back on return, and asks for this hint when it needs a
@@ -334,7 +342,8 @@ network.onEvent((event) => {
       ? `SHORT ${Math.max(0, (spec?.cost ?? 0) - event.credits)}`
       : event.reason === 'owned' ? 'ALREADY YOURS'
         : event.reason === 'closed' ? 'ARMORY CLOSED'
-          : `LOCKED · ${spec?.cost ?? 0}`;
+          : event.reason === 'full' ? 'FIELD FULL · NOTHING TO FILL'
+            : `LOCKED · ${spec?.cost ?? 0}`;
     hud.showAnnouncement(`✖ ${label}: ${why}`);
   }
 });

@@ -1,5 +1,6 @@
 import { WeaponType } from './mortar.js';
 import { HMG_WEAPONS } from './hmg.js';
+import { Difficulty } from './types.js';
 
 // ─── The fort's economy ────────────────────────────────────
 // Pilots earn credits alongside the score for every kill, and spend them at the
@@ -13,6 +14,7 @@ import { HMG_WEAPONS } from './hmg.js';
 /** What the armory can sell. One entry per station or consumable. */
 export enum ShopItem {
   VAMPIRE = 'vampire',
+  MINEFIELD = 'minefield',
 }
 
 export interface ShopItemSpec {
@@ -45,10 +47,32 @@ export const SHOP_CATALOG: ShopItemSpec[] = [
     // Vampire; once it is yours, 7 flies it.
     hotkey: '7',
   },
+  {
+    item: ShopItem.MINEFIELD,
+    // No station: a mine field is a consumable, so the owned check never applies and
+    // the row can be bought again to refill the dirt around the fort.
+    weapon: null,
+    cost: 500,
+    label: 'MINE FIELD',
+    desc: '120 mines ring the fort · kills anything that walks into them',
+    // Buys wherever the armory is open, and on the weapon panel the rest of the time:
+    // there is nothing to man, so the key spends the credits and the mines go down.
+    hotkey: '8',
+  },
 ];
 
-/** Credits a pilot starts a run with, before he has killed anything. */
-export const STARTING_CREDITS = 0;
+/**
+ * Credits a pilot starts a run with, before he has killed anything, per difficulty.
+ * Easy opens with enough to walk straight into the armory and buy everything it sells —
+ * the bomber and a mine field together — so a new crew spends its first minute shooting
+ * instead of saving. The other two hand out nothing: there the bomber is earned out of
+ * the horde, which is the whole point of the purse.
+ */
+export const STARTING_CREDITS: Record<Difficulty, number> = {
+  [Difficulty.EASY]: 1000,
+  [Difficulty.MEDIUM]: 0,
+  [Difficulty.HARD]: 0,
+};
 
 /**
  * Credits paid out per point of score earned. One for now, so a kill is worth the

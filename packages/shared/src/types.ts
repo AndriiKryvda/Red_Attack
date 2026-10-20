@@ -115,6 +115,20 @@ export interface BombData {
   position: Vec3;
 }
 
+// ─── Mine field ────────────────────────────────────────────
+/**
+ * One anti-personnel mine sitting in the dirt, laid by an armory purchase. The server
+ * owns the field outright — where the mines are and whether one has gone off — and the
+ * client only has to draw them, the same way it draws a falling shell.
+ */
+export interface MineData {
+  id: string;
+  /** Who paid for it; that pilot keeps the credit when the mine kills something. */
+  ownerId: string;
+  /** Where it sits on the ground. */
+  position: Vec3;
+}
+
 // ─── Player ────────────────────────────────────────────────
 export interface PlayerData {
   id: string;
@@ -185,6 +199,8 @@ export interface GameState {
   drones: DroneData[];
   /** Mini-bombs currently falling from the Vampire bombers (state-driven render). */
   bombs: BombData[];
+  /** Anti-personnel mines currently in the ground around the fort (static until walked over). */
+  mines: MineData[];
   players: PlayerData[];
   serverTime: number;
 }
@@ -420,8 +436,8 @@ export interface PurchaseEvent {
 export interface PurchaseDeniedEvent {
   type: 'purchase_denied';
   item: ShopItem;
-  /** credits: not enough in the purse; owned: already bought; closed: not while the fort is falling; locked: station not paid for. */
-  reason: 'credits' | 'owned' | 'closed' | 'locked';
+  /** credits: not enough in the purse; owned: already bought; closed: not while the fort is falling; locked: station not paid for; full: every mine hole is already occupied, so there is nothing to refill. */
+  reason: 'credits' | 'owned' | 'closed' | 'locked' | 'full';
   /** What he actually has, so the HUD can show how much more he is short. */
   credits: number;
 }

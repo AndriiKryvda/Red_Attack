@@ -11,6 +11,7 @@ import { createOutpost } from './Outpost';
 import { EnemyRenderer } from './Enemy';
 import { DroneRenderer } from './Drone';
 import { BombRenderer } from './Bomb';
+import { MineRenderer } from './Mines';
 import { EffectsManager } from './Effects';
 import { StructureRenderer } from './Structures';
 import { MortarView } from './Mortar';
@@ -34,6 +35,7 @@ export class GameScene {
   private enemyRenderer: EnemyRenderer;
   private droneRenderer: DroneRenderer;
   private bombRenderer: BombRenderer;
+  private mineRenderer: MineRenderer;
   private effects: EffectsManager;
   private structureRenderer: StructureRenderer;
   private mortar: MortarView;
@@ -120,6 +122,7 @@ export class GameScene {
     this.enemyRenderer = new EnemyRenderer(this.scene);
     this.droneRenderer = new DroneRenderer(this.scene);
     this.bombRenderer = new BombRenderer(this.scene);
+    this.mineRenderer = new MineRenderer(this.scene);
     this.effects = new EffectsManager(this.scene);
     this.structureRenderer = new StructureRenderer(this.scene);
 
@@ -191,6 +194,10 @@ export class GameScene {
 
     // The Vampire's mini-bombs in the air, drawn straight from the synced positions.
     this.bombRenderer.sync(state.bombs ?? []);
+
+    // Mines the armory laid around the fort. They never move, but every pilot sees them:
+    // a field is as much a warning to the horde as a weapon.
+    this.mineRenderer.sync(state.mines ?? [], _dt);
 
     // Process events (explosions etc)
     for (const ev of events) {

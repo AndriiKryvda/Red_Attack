@@ -83,6 +83,12 @@ export class InputManager {
    * without touching these bindings.
    */
   onShopBuy: ((hotkey: string) => void) | null = null;
+  /**
+   * Buy a mine field with its own key while the armory is shut (8). There is no
+   * station to man, so the key spends the credits outright — the same row the armory
+   * sells, reached without opening the panel.
+   */
+  onBuyMineField: (() => void) | null = null;
   /** Tells the UI to show/hide the "click to resume mouse look" hint. */
   onLockHintChange: ((show: boolean) => void) | null = null;
 
@@ -175,6 +181,13 @@ export class InputManager {
         // of flying into the target. 7 mans it; V is kept below as an alias.
         e.preventDefault();
         if (this.onSelectWeapon) this.onSelectWeapon(WeaponType.VAMPIRE);
+      }
+      if (e.code === 'Digit8' || e.code === 'Numpad8') {
+        // Not a station — a purchase. While the armory is up the number keys buy the
+        // row they are printed on (handled above), so out here 8 is the quick key for
+        // the mine field, and it costs the same 500 the panel shows.
+        e.preventDefault();
+        if (this.onBuyMineField) this.onBuyMineField();
       }
       if (e.code === 'KeyV') {
         // Alias for the Vampire bomber (7 is the primary key).

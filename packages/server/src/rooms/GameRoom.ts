@@ -1,7 +1,7 @@
 import { Room, Client } from '@colyseus/core';
 import {
   GamePhase, PlayerState, EnemyType,
-  EnemyData, DroneData, PlayerData, Vec3, ClientMessage,
+  EnemyData, DroneData, PlayerData, Vec3, ClientMessage, MineData,
   StructureData, StructureVariant,
   DRONE_SPEED, DRONE_BOOST_MULTIPLIER, DRONE_BOOST_COOLDOWN,
   DRONE_RELOAD_TIME, DRONE_KILL_RADIUS, DRONE_SLOW_RADIUS,
@@ -32,6 +32,8 @@ import {
   hmgDirection, hmgMuzzle,
   ShopItem, shopItemByKey, shopItemFor, weaponIsUnlocked,
   defaultLoadout, STARTING_CREDITS, CREDIT_PAYOUT,
+  mineFieldSpots, MINE_TRIGGER_RADIUS, MINEFIELD_ARM_TIME,
+  MINE_DAMAGE, MINE_BLAST_RADIUS, MINE_BLAST_SCALE,
   generateTreeSpots, TREE_COLLISION_RADIUS, TREE_BASE_HEIGHT,
   type TreeSpot,
 } from '@red-attack/shared';
@@ -121,6 +123,23 @@ interface InternalBomb {
 }
 
 /**
+ * One anti-personnel mine in the dirt. Nothing moves: the mine waits where it was
+ * buried until something walks into it, so the only clock it carries is the seconds
+ * the crew needs to put it down and get clear.
+ */
+interface InternalMine extends MineData {
+  /** Timestamp the mine becomes live; before that it is harmless. */
+  armedAt: number;
+  /**
+   * Index of the hole in the belt this mine was buried in, into `mineFieldSpots`. The
+   * field is a fixed set of holes, so this is what a refill looks for when it decides
+   * which spots are still free. Server-side only — the client never needs it, and
+   * `broadcastState` sends mines by id, owner and position alone.
+   */
+  spot: number;
+}
+
+/**
  * Share of the kill score paid to a pilot whose drone damaged an armoured target
  * without destroying it (the tank after the first hit).
  */
@@ -152,6 +171,8 @@ export class GameRoom extends Room {
   shells: Map<string, InternalShell> = new Map();
   /** Mini-bombs currently falling from the Vampire bombers. */
   bombs: Map<string, InternalBomb> = new Map();
+  /** Anti-personnel mines in the dirt around the fort, laid by an armory purchase. */
+  mines: Map<string, InternalMine> = new Map();
   /** Deterministic tree positions for drone collision (same layout as the client). */
   private treeSpots: TreeSpot[] = generateTreeSpots();
 
@@ -160,6 +181,7 @@ export class GameRoom extends Room {
   private structureIdCounter: number = 0;
   private shellIdCounter: number = 0;
   private bombIdCounter: number = 0;
+  private mineIdCounter: number = 0;
   /** Enemy types whose kill threshold has been reached (and announced). */
   private unlockedEnemies: Set<EnemyType> = new Set();
 
@@ -209,9 +231,10 @@ export class GameRoom extends Room {
       vampireBombs: 0,
       vampireReturning: false,
       vampireReloadAt: 0,
-      // The free stations and an empty purse: a bomber is something he has to earn
-      // out of the horde, not something the fort hands over for nothing.
-      credits: STARTING_CREDITS,
+      // The free stations and whatever the difficulty hands out: on hard and medium the
+      // purse starts empty, so a bomber is something he earns out of the horde rather
+      // than something the fort hands over for nothing. Easy pays ahead of him.
+      credits: STARTING_CREDITS[this.difficulty],
       unlocked: defaultLoadout(),
       lastInput: Date.now(),
       hmgFireAcc: perGun(0),
@@ -242,6 +265,9 @@ export class GameRoom extends Room {
     for (const [bid, bomb] of this.bombs) {
       if (bomb.ownerId === id) this.bombs.delete(bid);
     }
+    // Mines are deliberately left where they are. They are fort defence that somebody
+    // paid for, not a pilot's vehicle: a field keeps killing after its buyer disconnects,
+    // it simply stops scoring for anyone.
     this.players.delete(id);
   }
 
@@ -260,6 +286,7 @@ export class GameRoom extends Room {
     this.kills = 0;
     this.unlockedEnemies.clear();
     this.shells.clear();
+    this.mines.clear();
     this.buildVillage();
     this.broadcastEvent({ type: 'horde_start' });
     console.log(`[Horde] Room ${this.roomCode}: horde engaged — survive ${Math.round(HORDE_VICTORY_TIME / 60)} min to win`);
@@ -349,6 +376,7 @@ export class GameRoom extends Room {
       this.tickDrones();
       this.tickShells();
       this.tickBombs();
+      this.tickMines();
       this.tickHmgs();
       this.tickCooldowns();
     }
@@ -775,6 +803,102 @@ export class GameRoom extends Room {
     this.broadcastEvent({
       type: 'explosion', position: { ...bomb.impact },
       radius: VAMPIRE_BOMB_RADIUS, scale: VAMPIRE_BOMB_BLAST_SCALE,
+    });
+  }
+
+  /**
+   * Which holes in the belt around the fort are free, as indices into `mineFieldSpots`.
+   * Every mine carries the index of the hole it was buried in, so refilling is a set
+   * lookup rather than a distance search — and it stays correct however a hole became
+   * empty, whether its mine tripped under the horde or (someday) an enemy cleared it.
+   */
+  private emptyMineSpots(): number[] {
+    const taken = new Set<number>();
+    for (const mine of this.mines.values()) taken.add(mine.spot);
+    const spots = mineFieldSpots(0, 0);
+    const empty: number[] = [];
+    for (let i = 0; i < spots.length; i++) {
+      if (!taken.has(i)) empty.push(i);
+    }
+    return empty;
+  }
+
+  /**
+   * Refill the mine field. The layout is the shared module's business (see
+   * `mineFieldSpots`): the fort is ringed by a fixed belt of holes between the fence and
+   * the mortar's minimum range, every other ring turned half a step so the horde crosses
+   * a mine every couple of metres wherever it walks in from. A purchase fills every hole
+   * that is currently empty, which is what puts a thinned belt back up to a full field —
+   * it does not bury a second mine on top of one that is still waiting. Mines already in
+   * the dirt keep their owner and their arming clock, so a top-up never re-arms a live
+   * mine and never moves a kill to a different pilot. Returns how many mines went down;
+   * zero means the belt was already full, which the armory refuses rather than selling
+   * nothing at full price.
+   */
+  private layMinefield(player: InternalPlayer): number {
+    const spots = mineFieldSpots(0, 0);
+    let laid = 0;
+    for (const index of this.emptyMineSpots()) {
+      const mine: InternalMine = {
+        id: `m_${this.mineIdCounter++}`,
+        ownerId: player.id,
+        position: { ...spots[index] },
+        spot: index,
+        armedAt: this.serverTime + MINEFIELD_ARM_TIME * 1000,
+      };
+      this.mines.set(mine.id, mine);
+      laid++;
+    }
+    return laid;
+  }
+
+  /**
+   * Walk the field: any live enemy that comes within the trigger radius of an armed
+   * mine sets it off. A mine is spent whether or not the blast kills anything — it is a
+   * buried charge, not a turret — so a field can be walked apart by a thick enough
+   * horde, which is what makes buying one a bet on the next few minutes rather than a
+   * permanent wall.
+   */
+  private tickMines() {
+    if (this.mines.size === 0) return;
+    const triggerSq = MINE_TRIGGER_RADIUS * MINE_TRIGGER_RADIUS;
+    for (const mine of this.mines.values()) {
+      if (this.serverTime < mine.armedAt) continue;
+      for (const enemy of this.enemies.values()) {
+        if (enemy.dead) continue;
+        const dx = mine.position.x - enemy.position.x;
+        const dz = mine.position.z - enemy.position.z;
+        if (dx * dx + dz * dz > triggerSq) continue;
+        this.detonateMine(mine);
+        break;   // this mine is gone; move on to the next one in the field
+      }
+    }
+  }
+
+  /**
+   * A mine goes off. The blast is mortar-heavy on purpose — a mine is the one thing in
+   * the game that kills a tank outright — and the pilot who paid for the field keeps the
+   * credit for everything it takes with it. Mines never touch the village: they are laid
+   * around our own fort, and friendly scenery is not a target.
+   */
+  private detonateMine(mine: InternalMine) {
+    this.mines.delete(mine.id);
+    const radiusSq = MINE_BLAST_RADIUS * MINE_BLAST_RADIUS;
+    let kills = 0;
+    for (const enemy of this.enemies.values()) {
+      if (enemy.dead) continue;
+      const dx = mine.position.x - enemy.position.x;
+      const dz = mine.position.z - enemy.position.z;
+      if (dx * dx + dz * dz > radiusSq) continue;
+      if (this.damageEnemy(enemy, mine.ownerId, MINE_DAMAGE)) kills++;
+    }
+    if (kills >= MULTI_KILL_THRESHOLD) {
+      const player = this.players.get(mine.ownerId);
+      if (player) this.award(player, MULTI_KILL_BONUS);
+    }
+    this.broadcastEvent({
+      type: 'explosion', position: { ...mine.position },
+      radius: MINE_BLAST_RADIUS, scale: MINE_BLAST_SCALE,
     });
   }
 
@@ -1239,12 +1363,23 @@ export class GameRoom extends Room {
           this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'owned', credits: player.credits });
           break;
         }
+        // A mine field is a refill of the belt, not a stack of belts. When every hole is
+        // already occupied there is nothing this purchase could bury, so the armory says
+        // so instead of taking the credits for a field that would not change by one mine.
+        if (spec.item === ShopItem.MINEFIELD && this.emptyMineSpots().length === 0) {
+          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'full', credits: player.credits });
+          break;
+        }
         if (player.credits < spec.cost) {
           this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'credits', credits: player.credits });
           break;
         }
         player.credits -= spec.cost;
         if (spec.weapon) player.unlocked.push(spec.weapon);
+        // A row that sells no station is a consumable: it does its work the moment it is
+        // paid for instead of handing over something to man. The mine field goes into the
+        // dirt here, on the far side of the wire, and waits.
+        if (spec.item === ShopItem.MINEFIELD) this.layMinefield(player);
         // Everyone hears about it: the row goes to OWNED on every screen, and the
         // room knows who just walked out with a bomber.
         this.broadcastEvent({
@@ -1411,6 +1546,9 @@ export class GameRoom extends Room {
       })),
       bombs: Array.from(this.bombs.values()).map(b => ({
         id: b.id, ownerId: b.ownerId, position: b.position,
+      })),
+      mines: Array.from(this.mines.values()).map(m => ({
+        id: m.id, ownerId: m.ownerId, position: m.position,
       })),
       players: Array.from(this.players.values()).map(p => ({
         id: p.id, name: p.name, state: p.state,

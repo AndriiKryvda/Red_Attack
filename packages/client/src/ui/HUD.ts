@@ -1,4 +1,4 @@
-import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf, DIFFICULTY_LABELS, SHOP_CATALOG, ShopItemSpec, shopItemFor, weaponIsUnlocked } from '@red-attack/shared';
+import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf, DIFFICULTY_LABELS, SHOP_CATALOG, ShopItemSpec, ShopItem, shopItemFor, shopItemByKey, weaponIsUnlocked, MINEFIELD_MINES } from '@red-attack/shared';
 
 export class HUD {
   private breachDisplay: HTMLElement;
@@ -25,6 +25,8 @@ export class HUD {
   private wpMortarState: HTMLElement;
   private wpVampire: HTMLElement;
   private wpVampireState: HTMLElement;
+  private wpMinefield: HTMLElement;
+  private wpMinefieldState: HTMLElement;
   /** One row and one state cell per machine gun, in the order the nests are numbered. */
   private wpHmg: HTMLElement[] = [];
   private wpHmgState: HTMLElement[] = [];
@@ -69,6 +71,8 @@ export class HUD {
     this.wpMortarState = document.getElementById('wp-mortar-state')!;
     this.wpVampire = document.getElementById('wp-vampire')!;
     this.wpVampireState = document.getElementById('wp-vampire-state')!;
+    this.wpMinefield = document.getElementById('wp-minefield')!;
+    this.wpMinefieldState = document.getElementById('wp-minefield-state')!;
     // The four gun rows are looked up rather than written out: the panel and the
     // nests are numbered the same way, 3 to 6.
     for (let i = 1; i <= HMG_NESTS.length; i++) {
@@ -188,13 +192,19 @@ export class HUD {
           ? (vampireRearm > 0 ? `Returning · rearm ${vampireRearm}s` : 'Returning to base')
           : `${player.vampireBombs ?? 0} bombs · LMB to drop`;
       }
-      this.updateWeaponPanel(player, mortarWait, droneWait, hmgGun, hmgWait, vampireRearm);
+      // Mines this pilot paid for that are still in the dirt. The whole room can see a
+      // field, but only the buyer's count matters here: he is the one it kills for. The
+      // belt's own total is what decides whether there is anything left to buy — the
+      // field is one shared ring of holes, whoever happens to pay for each mine in it.
+      const minesInGround = (state.mines ?? []).filter(m => m.ownerId === localSessionId).length;
+      const minesInBelt = (state.mines ?? []).length;
+      this.updateWeaponPanel(player, mortarWait, droneWait, hmgGun, hmgWait, vampireRearm, minesInGround, minesInBelt);
       this.scoreDisplay.textContent = `Score: ${player.score}`;
       // The purse sits under the score: the score is what he did, the credits are
       // what he has not spent yet. They tick up together and only ever diverge when
       // he buys something.
       this.creditsDisplay.innerHTML = `CREDITS <b>${player.credits ?? 0}</b>`;
-      this.renderShop(player);
+      this.renderShop(player, minesInBelt);
 
       // Key guide: pulse the Space row while a launch is available.
       this.kgLaunch.classList.toggle('on', player.state !== PlayerState.PILOTING);
@@ -223,6 +233,7 @@ export class HUD {
   private updateWeaponPanel(
     player: PlayerData, mortarWait: number, droneWait: number,
     hmgGun: number, hmgWait: number[], vampireRearm: number,
+    minesInGround: number = 0, minesInBelt: number = 0,
   ) {
     if (!this.weaponPanel) return;
     const weapon = player.weapon ?? WeaponType.FPV;
@@ -254,6 +265,18 @@ export class HUD {
         : player.vampireReturning
           ? (vampireRearm > 0 ? `REARM ${vampireRearm}s` : 'RETURNING')
           : `${player.vampireBombs ?? 0} BOMBS`;
+    // The mine field is not a station to man, so its row counts what is left in the
+    // dirt instead: how many of this pilot's mines are still waiting. A full belt says
+    // so — pressing 8 then would buy nothing, and the panel says why before the credits
+    // are asked for. Once the horde has walked some of them off, the row falls back to
+    // its price and says what 8 buys.
+    const mineCost = shopItemByKey(ShopItem.MINEFIELD)?.cost ?? 0;
+    this.wpMinefield.classList.toggle('on', minesInGround > 0);
+    this.wpMinefieldState.textContent = minesInBelt >= MINEFIELD_MINES
+      ? 'FULL'
+      : minesInGround > 0
+        ? `${minesInGround} IN GROUND`
+        : `BUY · ${mineCost}`;
     // The four guns: whose trigger is manned, and what is left in each belt. An
     // empty one shows the swap countdown instead of a number.
     for (let i = 0; i < this.wpHmg.length; i++) {
@@ -287,21 +310,30 @@ export class HUD {
    * short by however much the panel spells out. It runs off the server's own
    * credits and unlock list, so the shop never offers what the server would refuse.
    */
-  private renderShop(player: PlayerData) {
+  private renderShop(player: PlayerData, minesInBelt: number = 0) {
     if (!this.shopVisible) return;
     const credits = player.credits ?? 0;
     const unlocked = player.unlocked ?? [];
     this.spCredits.textContent = `${credits}`;
     for (const row of this.shopRows) {
       const owned = !!row.spec.weapon && unlocked.includes(row.spec.weapon);
+      // A mine field refills the belt rather than stacking another one, so a belt with no
+      // empty hole left is as spent as a station he already owns: the row says so, and the
+      // server would refuse the credits anyway.
+      const full = row.spec.item === ShopItem.MINEFIELD && minesInBelt >= MINEFIELD_MINES;
       const short = Math.max(0, row.spec.cost - credits);
-      row.el.classList.toggle('owned', owned);
-      row.el.classList.toggle('affordable', !owned && short === 0);
-      row.el.classList.toggle('expensive', !owned && short > 0);
-      row.el.title = owned ? `${row.spec.label} — already yours` : `Buy ${row.spec.label} for ${row.spec.cost} credits`;
+      row.el.classList.toggle('owned', owned || full);
+      row.el.classList.toggle('affordable', !owned && !full && short === 0);
+      row.el.classList.toggle('expensive', !owned && !full && short > 0);
+      row.el.title = owned
+        ? `${row.spec.label} — already yours`
+        : full
+          ? `${row.spec.label} — every hole in the belt is already mined`
+          : `Buy ${row.spec.label} for ${row.spec.cost} credits`;
       row.state.textContent = owned
         ? 'OWNED'
-        : (short === 0 ? 'AFFORDABLE' : `SHORT ${short}`);
+        : full ? 'FIELD FULL'
+          : (short === 0 ? 'AFFORDABLE' : `SHORT ${short}`);
     }
   }
 

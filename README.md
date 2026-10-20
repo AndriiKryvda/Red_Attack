@@ -1,6 +1,6 @@
 # 🔴 Red Attack
 
-A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an escalating horde for 20 minutes. Two weapons are on the table: fly a kamikaze drone in first-person view for precision work, or stand at the tube mortar and put shells across the middle of the field. The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
+A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an escalating horde for 20 minutes. Three weapons come free with the fort: fly a kamikaze drone in first-person view for precision work, stand at the tube mortar and put shells across the middle of the field, or run one of the four heavy machine guns on the berm. A fourth — the Vampire mini-bomber — sits in the armory until a pilot buys it out of the credits his own kills pay out (see [Credits and the Armory](#credits-and-the-armory)). The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
 
 ## Tech Stack
 
@@ -29,18 +29,23 @@ red-attack/
 │   │       │                #   rings and the shell / shell-camera layer
 │   │       │                #   Structures.ts — client side of the village state
 │   │       │                #   VehicleModels.ts — horde vehicles
-│   │       ├── ui/          # HUD overlay
+│   │       │                #   Bomb.ts — the Vampire's mini-bombs in the air
+│   │       ├── ui/          # HUD overlay + the armory panel
 │   │       └── main.ts      # Game loop
 │   ├── server/          # Colyseus game server
 │   │   └── src/
-│   │       ├── rooms/       # GameRoom (state, physics, horde, village, shells)
+│   │       ├── rooms/       # GameRoom (state, physics, horde, village, shells, armory)
 │   │       └── index.ts     # HTTP + WebSocket entry
 │   └── shared/          # Shared types & game constants
 │       └── src/
 │           ├── types.ts
 │           ├── constants.ts
 │           ├── mortar.ts      # weapon types, range clamp, shared ballistics
-│           └── structures.ts  # STRUCTURE_SPECS, village layout, spawn edges
+│           ├── vampire.ts     # bomber stats: bomb stack, altitude band, re-arm
+│           ├── hmg.ts         # the four guns, their belts and their arc of fire
+│           ├── economy.ts     # SHOP_CATALOG, credit payouts, default loadout
+│           ├── structures.ts  # STRUCTURE_SPECS, village layout, spawn edges
+│           └── trees.ts       # deterministic tree scatter (renderer + collision)
 ├── docs/                # Design documents
 └── package.json         # Workspace root
 ```
@@ -75,12 +80,17 @@ Open **http://localhost:5173** in your browser.
 
 ## Controls
 
-Six stations, one key each: `1` mans the FPV drone pad, `2` mans the tube mortar and
-`3`–`6` man the four heavy machine guns on the berm. `Tab` walks through all six in
-that order. `Space` then does whatever the manned station does — launch the quad, send
-a shell at wherever the fort view is pointing, or run the belt of the gun you are
-standing at. With the tube manned, the left mouse button is a second trigger for the
-same shell; on a machine gun it is the same held trigger as `Space`.
+Seven stations, one key each: `1` mans the FPV drone pad, `2` mans the tube mortar,
+`3`–`6` man the four heavy machine guns on the berm, and `7` mans the Vampire bomber —
+which answers only once somebody has bought it at the armory
+([Credits and the Armory](#credits-and-the-armory)). `Tab` walks the stations this
+pilot actually holds, in the order drone → bomber → mortar → the four guns, so a
+station he has not paid for is simply stepped over. `Space` then does whatever the
+manned station does — launch the quad, send a shell at wherever the fort view is
+pointing, run the belt of the gun you are standing at, or put the bomber off the pad.
+With the tube manned, the left mouse button is a second trigger for the same shell; on
+a machine gun it is the same held trigger as `Space`; on the bomber it releases a
+mini-bomb, as does `F`. `B` raises the armory over the top of all of it.
 
 ### Keys
 
@@ -88,15 +98,18 @@ same shell; on a machine gun it is the same held trigger as `Space`.
 |-----|--------|
 | **1 / 2** | Man the FPV drone pad / man the tube mortar |
 | **3 / 4 / 5 / 6** | Man the north / east / south / west machine gun |
-| **Tab** | Walk to the next station (drone → mortar → the four guns → drone) |
+| **7** | Man the Vampire bomber — a dead key until it is bought, and the key that buys it while the armory is open |
+| **Tab** | Walk to the next station you hold (drone → bomber → mortar → the four guns → drone) |
+| **B** | Open / close the armory — spend earned credits on weapons |
 | **W / S** | Forward / backward thrust (in drone's facing direction) |
 | **A / D** | Yaw rotation (additive with mouse); on a gun, traverse left / right |
 | **Mouse X** | Yaw rotation (additive with A/D); on a gun, lay the barrel |
 | **Mouse Y** | Pitch (tilt nose up / down); on a gun, elevate within the pintle's limits |
 | **↑ / ↓** or **Q / E** | Pitch (tilt nose up / down) — keyboard equivalent of mouse Y |
-| **Space** | Ascend (throttle up); at the fort: launch, fire the mortar, or hold to run a gun's belt |
+| **Space** | Ascend (throttle up); at the fort: launch, fire the mortar, hold to run a gun's belt, or send the bomber off the pad |
 | **Shift** | Descend (throttle down) |
-| **LMB** | Boost (2× speed); with the tube manned, fires the mortar; on a gun, the held trigger |
+| **LMB** | Boost (2× speed); with the tube manned, fires the mortar; on a gun, the held trigger; on the bomber, releases a mini-bomb |
+| **F** | Release a mini-bomb (Vampire — the same drop as `LMB`) |
 | **R** | Self-destruct drone |
 | **H** | Show / hide the on-screen key guide (remembered between sessions) |
 | **M** | Sound on / off — mutes gunfire, explosions, engines and the horde's battle cries |
@@ -169,6 +182,95 @@ and the client only streams the lay and the trigger the way it streams drone inp
 Each round comes back as an `hmg_shot` event carrying the ray it flew and how far it
 was worth, which is what every client draws the tracer to.
 
+### The Vampire Bomber
+
+The fourth weapon, and the only one the fort does not start holding: a heavy bomber on
+key `7` that carries a stack of mini-bombs under its belly instead of a single shaped
+charge. It is flown with exactly the same stick as the kamikaze quad — `W`/`S` forward
+and back, `A`/`D` and the mouse to turn it, `Space` to climb and `Shift` to sink — but
+where the quad is a one-way trip, the Vampire comes back for another run.
+
+1. **Buy it** — `7` is a dead key until the armory has sold it to you (see
+   [Credits and the Armory](#credits-and-the-armory)). Until then the weapon rack prints
+   `LOCKED · 300` beside the key, and pressing it prints the price instead of flying.
+2. **Launch** — man it with `7` and press `Space`. It lifts to 20 m and cruises at
+   13 m/s — slower than the quad, and considerably less nimble.
+3. **Work a band, not the sky** — the server clamps the airframe between 20 m and 80 m
+   (`VAMPIRE_MIN/MAX_ALTITUDE`), climbing and sinking at 10 m/s. The floor sits above the
+   water tower (15 m) and the treeline (~11 m), so even at the bottom of its band a
+   Vampire never clips a rooftop; the ceiling keeps it on camera.
+4. **Drop** — `LMB` or `F` releases a mini-bomb: a 5 m blast dealing 3 damage, a
+   footprint between a quad detonation and a mortar shell. That kills a soldier, a
+   motorcyclist or a tank outright and takes most of the way through a bear or a golf
+   cart, and it lands one hit on any building caught inside it, so a stack walked down
+   the main street chews through the village. Five bombs ride under the belly and the
+   release will not let go faster than one every 0.6 s, so a stack is walked down rather
+   than dumped at once. A bomb is a dumb one — it falls from wherever it was let go under
+   the same closed-form gravity the mortar's shells use, and cannot be steered after
+   release.
+5. **Come home** — when the fifth bomb is gone the autopilot takes over: the bomber
+   flies itself back to the pad, holds over it while the crew re-arms for 6 s, and hands
+   the controls back for the next run. A sortie is a loop — drop, drop, drop, home,
+   re-arm, out again — and the weapon rack shows either the bombs left in the stack or
+   what the autopilot is doing on the way back.
+
+What it is not: a precision instrument. A 13 m/s airframe with a 5 m blast wants to be
+over a column rather than over a single soldier, and it trades the quad's one perfect
+strike for five ordinary ones and the ability to come back and do it again.
+
+Like every other weapon it is server-owned: the flight envelope, the bomb count, the
+release interval and the re-arm clock all live on the room
+(`launchVampire`, `dropBomb`, `tickBombs`, `tickVampireReturn` and `reloadVampire` in
+`packages/server/src/rooms/GameRoom.ts`), and the client only streams the same stick it
+streams for the quad. The tuning numbers sit in `packages/shared/src/vampire.ts`.
+
+## Credits and the Armory
+
+Score records what a pilot did; credits are what he can spend. Every point of score also
+pays one credit into his purse (`CREDIT_PAYOUT`), and the purse buys stations the fort
+was not built holding. The two ledgers are deliberately separate — spending never
+touches the scoreboard, so buying a bomber does not make a pilot look cheaper than he
+is.
+
+Press **`B`** and the armory opens over the middle of the screen: the catalogue with a
+price and a line of copy each, what is in the purse, and a status on every row —
+`AFFORDABLE`, `SHORT <n>` or `OWNED`. The number key printed on a row buys it, so `7`
+buys the Vampire. Gameplay input goes completely quiet while the panel is up — held keys
+and the mouse are flushed, so nothing changes stations or drops ordnance behind your
+back — and `B` closes it again. A purchase that goes through closes it for you.
+
+| Item | Key | Cost | What it buys |
+|------|-----|------|--------------|
+| Vampire bomber | `7` | 300 | The bomber on key `7`, for the rest of the run |
+
+**The server decides every transaction.** A purchase request names a catalogue row and
+nothing else; the price comes from the server's own copy of the catalogue, so a tampered
+browser cannot ask for a bomber at a tenth of what it costs, cannot buy a row that does
+not exist, and cannot man a station it never paid for — `select_weapon` refuses locked
+stations exactly the same way. Credits and unlocks live on the player's state, which the
+client only ever receives.
+
+A refusal goes to the pilot who asked and to nobody else, and says why:
+
+| Print | Means |
+|-------|-------|
+| `✖ VAMPIRE BOMBER: SHORT 240` | Not enough in the purse — the number is the shortfall |
+| `✖ VAMPIRE BOMBER: ALREADY YOURS` | Already bought; there is no second one |
+| `✖ VAMPIRE BOMBER: ARMORY CLOSED` | Nothing changes hands before the fight starts or after the fort falls |
+| `✖ VAMPIRE BOMBER: LOCKED · 300` | The station key was pressed with the armory shut — this is what a locked station feels like |
+
+A purchase that succeeds is announced to the whole room, so the other pilots hear that
+somebody just walked out with a bomber, and the row flips to `OWNED` on every screen at
+once. Unlocks are per pilot and last the rest of the run: two pilots can each buy their
+own Vampire, and one pilot's purchase does not hand a bomber to his teammates.
+
+The whole shop is data in `packages/shared/src/economy.ts`. A new weapon is one row in
+`SHOP_CATALOG` — price, the station it buys, a label, a line of copy, and the key that
+buys it — and the server, the HUD and the hotkeys all read that row, so nothing else has
+to change. `STARTING_CREDITS` sets what a pilot is handed before he has killed anything
+(0, so the first bomber is earned) and `CREDIT_PAYOUT` sets the exchange rate between the
+two ledgers.
+
 ## Multiplayer
 
 - **Create Game** — generates a 4-digit numeric room code (digits only, no letters). The host also picks a **difficulty** (Easy / Medium / Hard) for the room; joiners inherit whatever the host chose.
@@ -178,6 +280,7 @@ was worth, which is what every client draws the tracer to.
 - Shared outpost HP and horde state.
 - Every pilot sees the other pilots' drones in the air (colour-coded per player, with a callsign tag and a smoke trail).
 - Weapons are per pilot: switching between the quad and the mortar, and each mortar reload, is private to that pilot, while every shell, crater and kill is shared. Only the shooter's own camera leaves the fort to watch a shell land.
+- So is the purse: credits and everything bought at the armory belong to the pilot who earned and paid for them, and reset when a new game starts.
 
 ## Game Mechanics
 
@@ -192,6 +295,12 @@ was worth, which is what every client draws the tracer to.
 | Mortar shell | 9 m blast — kills everything it catches, tank included, and lands one heavy hit on any building inside it |
 | Mortar reload | 2 s per pilot |
 | Mortar flight | 1.9 s at 30 m → 3.8 s at 120 m, apex 15–54 m |
+| Vampire bomber | 13 m/s, flown in a clamped 20–80 m band, climbs and sinks at 10 m/s |
+| Vampire mini-bomb | 5 m blast at 3 damage, five per sortie, no more than one every 0.6 s |
+| Vampire re-arm | 6 s on the pad, flown home by its own autopilot |
+| Starting credits | 0 — every credit is earned out of the horde |
+| Credit payout | 1 credit per point of score, on a ledger separate from the score itself |
+| Armory | `B` — the Vampire bomber is 300 credits, and unlocks for the pilot who pays |
 | Horde spawn rate | 0.35 → 2.0 enemies/s (ramps over 15 min, ×players) |
 | Difficulty | Easy / Medium / Hard — scales the horde to 25% / 50% / 100% of the hard spawn rate and live enemy cap (Easy is the default) |
 | Threat level | +1 every 60 s |

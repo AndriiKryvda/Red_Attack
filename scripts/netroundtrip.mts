@@ -28,13 +28,27 @@ function eq(a: unknown, b: unknown, what: string): void {
   if (a !== b) failures.push(`${what}: got ${JSON.stringify(a)}, expected ${JSON.stringify(b)}`);
 }
 
+/** A decoded countdown may be rounded up to a whole second, and nothing more. */
+const CLOCK_TOL = 1_500;
+
+/**
+ * A timestamp that travels as a relative offset must come back as either zero
+ * (spent) or the moment it was set to. Anything else means the two ends are
+ * reading different clocks — which is how every freeze lasted an age.
+ */
+function countdown(decoded: number, src: number, label: string): void {
+  if (src <= world.serverTime) eq(decoded, 0, `${label} spent`);
+  else near(decoded, src, CLOCK_TOL, label);
+}
+
 // ─── The world under test ─────────────────────────────────────────────────────
 const now = 1_700_000_000_000;
-const epoch = now - 60_000;
 const world: any = {
   phase: 'playing', threatLevel: 3, elapsed: 60, enemiesAlive: 4,
   kills: 12, leaks: 2, playerCount: 2, roomCode: '0427', difficulty: 'hard',
-  serverTime: now - epoch,
+  // One clock everywhere: the server's epoch, the same one every entity timestamp
+  // below is stamped on. Two clock domains sharing a wire is what broke the HUD.
+  serverTime: now,
   enemies: new Map(), structures: new Map(), drones: new Map(),
   bombs: new Map(), mines: new Map(), players: new Map(),
 };
@@ -110,9 +124,10 @@ function verify(label: string, applier: StateApplier): void {
     near(e.position.x, src.position.x, POS_STEP / 2 + 1e-9, `${label}: ${e.id} x`);
     near(e.position.z, src.position.z, POS_STEP / 2 + 1e-9, `${label}: ${e.id} z`);
     near(e.speed, src.speed, SPEED_STEP / 2 + 1e-9, `${label}: ${e.id} speed`);
-    // Slow/freeze ride the client's own clock, so only "still running" is comparable.
-    eq(e.slowedUntil > 0, src.slowedUntil > now, `${label}: ${e.id} slowed`);
-    eq(e.frozenUntil > 0, src.frozenUntil > now, `${label}: ${e.id} frozen`);
+    // Slow/freeze ride the server's clock, rebased on the client — check the value,
+    // not just that something arrived.
+    countdown(e.slowedUntil, src.slowedUntil, `${label}: ${e.id} slowed`);
+    countdown(e.frozenUntil, src.frozenUntil, `${label}: ${e.id} frozen`);
   }
 
   eq(s.structures.length, world.structures.size, `${label}: structure count`);
@@ -122,6 +137,7 @@ function verify(label: string, applier: StateApplier): void {
     eq(st.kind, src.kind, `${label}: ${st.id} kind`);
     eq(st.variant, src.variant, `${label}: ${st.id} variant`);
     eq(st.hp, src.hp, `${label}: ${st.id} hp`);
+    eq(st.maxHp, src.maxHp, `${label}: ${st.id} maxHp`);
     eq(st.burning, src.burning, `${label}: ${st.id} burning`);
     eq(st.destroyed, src.destroyed, `${label}: ${st.id} destroyed`);
     near(st.x, src.x, POS_STEP / 2 + 1e-9, `${label}: ${st.id} x`);
@@ -159,6 +175,9 @@ function verify(label: string, applier: StateApplier): void {
     eq(p.hmgAmmo.join(','), src.hmgAmmo.join(','), `${label}: ${p.id} hmgAmmo`);
     eq(p.unlocked.join(','), src.unlocked.join(','), `${label}: ${p.id} unlocked`);
     eq(p.vampireBombs, src.vampireBombs, `${label}: ${p.id} vBombs`);
+    countdown(p.cooldownUntil, src.cooldownUntil, `${label}: ${p.id} cooldown`);
+    countdown(p.mortarReadyAt, src.mortarReadyAt, `${label}: ${p.id} mortar`);
+    countdown(p.vampireReloadAt, src.vampireReloadAt, `${label}: ${p.id} vampireReload`);
   }
 }
 
@@ -210,6 +229,30 @@ eq(after.enemies.find((e: any) => e.id === 'e_2'), undefined, 'removed enemy is 
 eq(after.enemies.some((e: any) => e.id === 'e_9'), true, 'new enemy arrived');
 eq(after.structures.length, 3, 'new structure arrived');
 console.log('  death, removal, arrival and a purchase checked');
+
+// ─── A building takes a hit, a car dies ───────────────────────────────────────
+// The cells a patch carries must line up with the cells the client reads, or the
+// burning/destroyed bits get decoded out of the wrong number. `s_1` has maxHp 2,
+// whose second bit reads back as "destroyed" if the layout ever slips by one.
+world.structures.get('s_0').hp = 2;
+pump(applierA, clientA);
+verify('building wounded', applierA);
+const wounded = applierA.flush().structures.find((s: any) => s.id === 's_0')!;
+eq(wounded.hp, 2, 'building took a hit');
+eq(wounded.destroyed, false, 'a wounded building is not rubble');
+eq(wounded.burning, false, 'a wounded building is not burning');
+
+world.structures.get('s_1').hp = 0;
+world.structures.get('s_1').burning = false;
+world.structures.get('s_1').destroyed = true;
+pump(applierA, clientA);
+verify('car destroyed', applierA);
+const wreck = applierA.flush().structures.find((s: any) => s.id === 's_1')!;
+eq(wreck.hp, 0, 'a destroyed car is at 0 hp');
+eq(wreck.destroyed, true, 'a destroyed car reads as destroyed');
+eq(wreck.burning, false, 'a destroyed car is not burning');
+eq(wreck.maxHp, 2, 'a structure keeps the maxHp it spawned with');
+console.log('  structure damage and destruction checked');
 
 // ─── A second client joins late and must be handed the whole world ───────────
 const clientB: any = { sessionId: 'B' };

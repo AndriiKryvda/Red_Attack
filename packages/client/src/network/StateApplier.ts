@@ -74,7 +74,11 @@ export class StateApplier {
     if (frame.f === 1) this.reset();
     this.frames++;
 
-    const now = Date.now();
+    // One clock on the client: the server's. Relative offsets are rebased onto the
+    // stamp of the frame that carried them, so every timestamp the client holds —
+    // cooldowns, slow/freeze expiry, wreck age — is comparable against
+    // `state.serverTime`, exactly as the pre-delta protocol's absolute ones were.
+    const now = frame.st;
     this.state.serverTime = frame.st;
     this.interpolator.note(frame.st);
 
@@ -202,8 +206,8 @@ export class StateApplier {
       s.x = dequantPos(r[3]);
       s.z = dequantPos(r[4]);
       s.yaw = dequantAngle(r[5]);
-      s.hp = r[6];
-      s.maxHp = r[7];
+      s.maxHp = r[6];
+      s.hp = r[7];
       s.burning = flagBits(r[8], SF_BURNING);
       s.destroyed = flagBits(r[8], SF_DESTROYED);
     }

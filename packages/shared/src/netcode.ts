@@ -21,7 +21,7 @@
  */
 
 /** Bump when a tuple layout below changes, so a stale client resyncs instead of misreading. */
-export const NET_VERSION = 1;
+export const NET_VERSION = 2;
 
 /** Metres per quantized position unit — 1 cm, and ±150 m fits comfortably in an int16. */
 export const POS_STEP = 0.01;
@@ -121,7 +121,7 @@ export type EnemyMove = [number, number, number];
 /** `p` = [id, hp, flags, slowMs, frozenMs] */
 export type EnemyPatch = [number, number, number, number, number];
 
-/** `a` = [id, kind, variant, x, z, yawQ | hp, maxHp, flags] */
+/** `a` = [id, kind, variant, x, z, yawQ, maxHp | hp, flags] */
 export type StructureAdd = [number, number, number, number, number, number, number, number, number];
 /** `p` = [id, hp, flags] */
 export type StructurePatch = [number, number, number];
@@ -182,7 +182,7 @@ export interface NetFrame {
   v: number;
   /** Monotonic frame counter, for the debug overlay. */
   t: number;
-  /** Server clock in ms since the room was created; the client's interpolation clock. */
+  /** The server's epoch clock in ms; the client's interpolation and countdown clock. */
   st: number;
   /** Present and 1 when this frame is a complete snapshot the client must reset onto. */
   f?: 1;

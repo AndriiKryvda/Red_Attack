@@ -62,7 +62,7 @@ export interface Snapshot {
   phase: string; threatLevel: number; elapsed: number; enemiesAlive: number;
   kills: number; leaks: number; playerCount: number; roomCode: string;
   difficulty: string;
-  /** Milliseconds since the room was created, not the epoch — it has to stay a small int. */
+  /** The server's epoch clock, in ms. Every timestamp on the wire is in this frame. */
   serverTime: number;
   // ReadonlyMap so the room's richer InternalEnemy et al. satisfy these views.
   enemies: ReadonlyMap<string, EnemySrc>;
@@ -158,15 +158,20 @@ function encodeEnemy(e: EnemySrc, now: number): Record3 {
   };
 }
 
-/** A building never moves, so its whole geometry rides in `stat` and leaves the hot path. */
+/**
+ * A building never moves, so its whole geometry rides in `stat` and leaves the
+ * hot path. `maxHp` is fixed once spawned and goes there too: anything left in
+ * `state` is re-sent on every hit, and a patch must stay exactly `[id, hp, flags]`
+ * for the client to read its state bits from the right cell.
+ */
 function encodeStructure(s: StructureSrc): Record3 {
   let flags = 0;
   if (s.burning) flags |= SF_BURNING;
   if (s.destroyed) flags |= SF_DESTROYED;
   return {
     stat: [wireIndex(STRUCTURE_KIND_WIRE, s.kind), wireIndex(STRUCTURE_VARIANT_WIRE, s.variant),
-      qPos(s.x), qPos(s.z), qAngle(s.yaw)],
-    state: [s.hp, s.maxHp, flags],
+      qPos(s.x), qPos(s.z), qAngle(s.yaw), s.maxHp],
+    state: [s.hp, flags],
     pos: [],
   };
 }

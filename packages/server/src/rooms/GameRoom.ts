@@ -184,11 +184,6 @@ export class GameRoom extends Room {
   private shellIdCounter: number = 0;
   private bombIdCounter: number = 0;
   private mineIdCounter: number = 0;
-  /**
-   * When the room came into being. The wire carries the clock as an offset from
-   * this rather than as an epoch timestamp, which keeps it inside two bytes.
-   */
-  private epochMs: number = Date.now();
   /** Per-client delta encoder; see net/DeltaStream. */
   private net!: DeltaStream;
   /** Enemy types whose kill threshold has been reached (and announced). */
@@ -1552,7 +1547,7 @@ export class GameRoom extends Room {
       playerCount: this.players.size,
       roomCode: this.roomCode,
       difficulty: this.difficulty,
-      serverTime: this.serverTime - this.epochMs,
+      serverTime: this.serverTime,
       enemies: this.enemies,
       structures: this.structures,
       drones: this.drones,

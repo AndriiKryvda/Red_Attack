@@ -148,7 +148,7 @@ export const MORTAR_GRAVITY = 30;
 export const MORTAR_POSITION = { x: 7, z: 5 };
 export const MORTAR_MUZZLE_HEIGHT = 1.9;
 /** Seconds the crew needs to lay the tube again between two shots. */
-export const MORTAR_RELOAD_TIME = 8;
+export const MORTAR_RELOAD_TIME = 2;
 /** Blast radius: everything inside it is gone, buildings take one hit each. */
 export const MORTAR_KILL_RADIUS = 9;
 /** Damage one shell deals (a bear has 5 hp, a tank 2), so one shell clears all. */

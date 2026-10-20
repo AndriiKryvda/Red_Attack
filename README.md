@@ -132,7 +132,7 @@ a 30 m/s pass would have flown past.
 3. **Fire** — `Space` or the left mouse button. The camera leaves the fort, tracks the
    shell from the side for the whole flight and holds a second on the crater before the
    view goes back.
-4. **Reload** — 8 s, on each pilot's own clock.
+4. **Reload** — 2 s, on each pilot's own clock.
 
 Flight time tells you the range: about 1.9 s at the near limit, 3.8 s at the far one,
 and the horde keeps walking all the while, so a shell is aimed where the column is
@@ -190,7 +190,7 @@ was worth, which is what every client draws the tracer to.
 | Drone reload | 5 s |
 | Mortar ring of fire | 30–120 m from the fort, laid at a fixed 60° elevation |
 | Mortar shell | 9 m blast — kills everything it catches, tank included, and lands one heavy hit on any building inside it |
-| Mortar reload | 8 s per pilot |
+| Mortar reload | 2 s per pilot |
 | Mortar flight | 1.9 s at 30 m → 3.8 s at 120 m, apex 15–54 m |
 | Horde spawn rate | 0.35 → 2.0 enemies/s (ramps over 15 min, ×players) |
 | Difficulty | Easy / Medium / Hard — scales the horde to 25% / 50% / 100% of the hard spawn rate and live enemy cap (Easy is the default) |

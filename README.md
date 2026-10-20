@@ -1,8 +1,8 @@
 # 🔴 Red Attack
 
-![Red Attack — fortified position under attack by the horde](red_attack1.jpg)
-
 A browser-based multiplayer fort defense game. A handful of pilots man the weapon stations of an open fortified position and hold it against an escalating horde for 20 minutes. Three weapons come free with the fort: fly a kamikaze drone in first-person view for precision work, stand at the tube mortar and put shells across the middle of the field, or run one of the four heavy machine guns on the berm. A fourth — the Vampire mini-bomber — sits in the armory until a pilot buys it out of the credits his own kills pay out (see [Credits and the Armory](#credits-and-the-armory)). The armory also sells something that is not a station at all: a hundred and twenty mines in the dirt around the wire, bought on key `8` for 500 credits ([The Mine Field](#the-mine-field)). The horde advances out of a Russian-held village on the north and east edges of the map, so the houses, barns, flats and parked cars that fly the tricolor are both the cover the enemies pour out of and targets in their own right.
+
+![Red Attack — fortified position under attack by the horde](red_attack1.jpg)
 
 ## Tech Stack
 

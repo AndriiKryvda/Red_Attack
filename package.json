@@ -22,7 +22,9 @@
     "build:client": "cd packages/client && npm run build",
     "start": "cd packages/server && node dist/index.js",
     "start:all": "concurrently -n server,client \"npm run start\" \"npm run preview:client\"",
-    "preview:client": "cd packages/client && npm run preview -- --host 0.0.0.0 --port 5173"
+    "preview:client": "cd packages/client && npm run preview -- --host 0.0.0.0 --port 5173",
+    "bench:net": "node scripts/netbench.mjs",
+    "test:net": "tsx scripts/netroundtrip.mts"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

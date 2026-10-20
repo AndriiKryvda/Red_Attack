@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './netcode.js';
 export * from './mortar.js';
 export * from './vampire.js';
 export * from './mines.js';

@@ -33,10 +33,12 @@ import {
   ShopItem, shopItemByKey, shopItemFor, weaponIsUnlocked,
   defaultLoadout, STARTING_CREDITS, CREDIT_PAYOUT,
   mineFieldSpots, MINE_TRIGGER_RADIUS, MINEFIELD_ARM_TIME,
+  RESYNC_MSG,
   MINE_DAMAGE, MINE_BLAST_RADIUS, MINE_BLAST_SCALE,
   generateTreeSpots, TREE_COLLISION_RADIUS, TREE_BASE_HEIGHT,
   type TreeSpot,
 } from '@red-attack/shared';
+import { DeltaStream, type Snapshot } from '../net/DeltaStream.js';
 import { roomCodeRegistry } from '../index.js';
 
 interface InternalEnemy extends EnemyData {
@@ -182,6 +184,13 @@ export class GameRoom extends Room {
   private shellIdCounter: number = 0;
   private bombIdCounter: number = 0;
   private mineIdCounter: number = 0;
+  /**
+   * When the room came into being. The wire carries the clock as an offset from
+   * this rather than as an epoch timestamp, which keeps it inside two bytes.
+   */
+  private epochMs: number = Date.now();
+  /** Per-client delta encoder; see net/DeltaStream. */
+  private net!: DeltaStream;
   /** Enemy types whose kill threshold has been reached (and announced). */
   private unlockedEnemies: Set<EnemyType> = new Set();
 
@@ -194,7 +203,10 @@ export class GameRoom extends Room {
     if ((Object.values(Difficulty) as string[]).includes(_options?.difficulty)) {
       this.difficulty = _options.difficulty as Difficulty;
     }
-    this.setPatchRate(TICK_RATE);
+    // There is no Colyseus Schema behind `this.state`, so `setPatchRate` would only
+    // start a timer nobody listens to. The room drives its own 20 Hz frame below and
+    // hands every client a hand-built delta through `net` instead.
+    this.net = new DeltaStream(this);
     this.setSimulationInterval(() => this.tick(), TICK_RATE);
     // The village is part of the map, so it has to stand there before the first
     // pilot ever launches a drone at it.
@@ -213,6 +225,9 @@ export class GameRoom extends Room {
 
   onJoin(client: Client, options?: { name?: string }) {
     const id = client.sessionId;
+    // Start this client's view empty so the next frame rebuilds the world for them
+    // and every frame after that only carries what moved.
+    this.net.add(client);
     const player: InternalPlayer = {
       id,
       name: options?.name || `Player ${this.players.size + 1}`,
@@ -252,6 +267,7 @@ export class GameRoom extends Room {
 
   onLeave(client: Client) {
     const id = client.sessionId;
+    this.net.remove(client);
     const player = this.players.get(id);
     if (player?.droneId) {
       this.drones.delete(player.droneId);
@@ -1246,6 +1262,9 @@ export class GameRoom extends Room {
 
   // ─── Message Handling ────────────────────────────────────
   private handleMessage(client: Client, msg: ClientMessage) {
+    // A client that cannot apply a delta asks for the world again. Handled ahead of
+    // the player lookup because it is about the socket, not about the pilot.
+    if ((msg as { type?: string })?.type === RESYNC_MSG) { this.net.resync(client); return; }
     const player = this.players.get(client.sessionId);
     if (!player) return;
     switch (msg.type) {
@@ -1517,8 +1536,13 @@ export class GameRoom extends Room {
   }
 
   // ─── Broadcasting ────────────────────────────────────────
+  /**
+   * Hand the tick's live maps to the delta stream. Nothing is copied or rebuilt
+   * here: the stream reads the room's own maps, encodes each entity once, and
+   * sends every client only what differs from what that client was last told.
+   */
   private broadcastState() {
-    const state = {
+    const snap: Snapshot = {
       phase: this.phase,
       threatLevel: this.threatLevel,
       elapsed: Math.floor(this.elapsed),
@@ -1528,42 +1552,15 @@ export class GameRoom extends Room {
       playerCount: this.players.size,
       roomCode: this.roomCode,
       difficulty: this.difficulty,
-      enemies: Array.from(this.enemies.values()).map(e => ({
-        id: e.id, type: e.type, position: e.position,
-        hp: e.hp, maxHp: e.maxHp, speed: e.speed,
-        slowedUntil: e.slowedUntil, frozenUntil: e.frozenUntil,
-        dead: e.dead, deathTime: e.deathTime, burning: e.burning,
-      })),
-      structures: Array.from(this.structures.values()).map(s => ({
-        id: s.id, kind: s.kind, variant: s.variant, x: s.x, z: s.z, yaw: s.yaw,
-        hp: s.hp, maxHp: s.maxHp, burning: s.burning, destroyed: s.destroyed,
-      })),
-      drones: Array.from(this.drones.values()).map(d => ({
-        id: d.id, ownerId: d.ownerId, position: d.position,
-        velocity: d.velocity, yaw: d.yaw, pitch: d.pitch,
-        launchedAt: d.launchedAt, alive: d.alive,
-        kind: d.kind, vampireBombs: d.vampireBombs, returning: d.returning,
-      })),
-      bombs: Array.from(this.bombs.values()).map(b => ({
-        id: b.id, ownerId: b.ownerId, position: b.position,
-      })),
-      mines: Array.from(this.mines.values()).map(m => ({
-        id: m.id, ownerId: m.ownerId, position: m.position,
-      })),
-      players: Array.from(this.players.values()).map(p => ({
-        id: p.id, name: p.name, state: p.state,
-        score: p.score, ready: p.ready,
-        droneId: p.droneId, cooldownUntil: p.cooldownUntil,
-        weapon: p.weapon, mortarReadyAt: p.mortarReadyAt,
-        hmgAmmo: p.hmgAmmo, hmgReloadAt: p.hmgReloadAt,
-        manningGun: p.manningGun, hmgYaw: p.hmgYaw, hmgPitch: p.hmgPitch,
-        vampireBombs: p.vampireBombs, vampireReturning: p.vampireReturning,
-        vampireReloadAt: p.vampireReloadAt,
-        credits: p.credits, unlocked: p.unlocked,
-      })),
-      serverTime: this.serverTime,
+      serverTime: this.serverTime - this.epochMs,
+      enemies: this.enemies,
+      structures: this.structures,
+      drones: this.drones,
+      bombs: this.bombs,
+      mines: this.mines,
+      players: this.players,
     };
-    this.broadcast('state', state);
+    this.net.broadcast(snap);
   }
 
   private broadcastEvent(event: any) {

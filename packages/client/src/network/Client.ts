@@ -1,10 +1,13 @@
 import { Client, Room } from '@colyseus/sdk';
-import { GameState, ServerEvent, WeaponType, ShopItem, MAX_PLAYERS, Difficulty } from '@red-attack/shared';
+import { GameState, ServerEvent, WeaponType, ShopItem, MAX_PLAYERS, Difficulty, RESYNC_MSG, type NetFrame } from '@red-attack/shared';
+import { StateApplier, DesyncError } from './StateApplier.js';
 
 export class NetworkClient {
   private client: Client;
   private room: Room | null = null;
-  private state: GameState | null = null;
+  /** The live world, rebuilt in place from the server's delta frames. */
+  private applier = new StateApplier();
+  private haveState: boolean = false;
   private events: ServerEvent[] = [];
   private eventCallbacks: ((event: ServerEvent) => void)[] = [];
   private inputRate: number = 0;
@@ -40,10 +43,23 @@ export class NetworkClient {
         this.room = await this.client.joinOrCreate('game', { name, difficulty });
       }
       this._sessionId = this.room.sessionId;
+      this.applier.ownSessionId = this._sessionId;
       console.log('[Net] Joined room:', this.room.roomId, 'as', this._sessionId);
 
-      this.room.onMessage('state', (state: GameState) => {
-        this.state = state;
+      this.room.onMessage('state', (frame: NetFrame) => {
+        try {
+          this.applier.apply(frame);
+          this.haveState = true;
+        } catch (err) {
+          // A delta that names something we never saw means we fell out of step —
+          // the only honest recovery is to ask for the whole world again.
+          if (err instanceof DesyncError) {
+            console.warn('[Net] Desynced, resyncing:', err.message);
+            this.requestResync();
+          } else {
+            throw err;
+          }
+        }
       });
 
       this.room.onMessage('event', (event: ServerEvent) => {
@@ -54,6 +70,7 @@ export class NetworkClient {
       this.room.onLeave(() => {
         console.log('[Net] Left room');
         this.room = null;
+        this.haveState = false;
       });
     } catch (err: any) {
       let message = err?.message || 'Failed to connect to server';
@@ -140,8 +157,18 @@ export class NetworkClient {
     }
   }
 
+  /** Ask the server to rebuild us from scratch; see the desync handler in `connect`. */
+  private requestResync() {
+    if (this.room) this.room.send(RESYNC_MSG, { type: RESYNC_MSG });
+  }
+
+  /**
+   * The world as it should be drawn right now: server positions interpolated to
+   * the render clock. Safe to call several times in one frame — it is a pure
+   * function of the frames received so far.
+   */
   getState(): GameState | null {
-    return this.state;
+    return this.haveState ? this.applier.read() : null;
   }
 
   getEvents(): ServerEvent[] {

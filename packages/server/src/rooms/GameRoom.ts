@@ -30,6 +30,8 @@ import {
   HMG_NESTS, HMG_BELT_SIZE, HMG_RELOAD_TIME, HMG_ROUNDS_PER_SEC, HMG_DAMAGE,
   HMG_MAX_RANGE, HMG_SPREAD, HMG_INPUT_TIMEOUT, hmgGunOf, clampHmgPitch,
   hmgDirection, hmgMuzzle,
+  ShopItem, shopItemByKey, shopItemFor, weaponIsUnlocked,
+  defaultLoadout, STARTING_CREDITS, CREDIT_PAYOUT,
   generateTreeSpots, TREE_COLLISION_RADIUS, TREE_BASE_HEIGHT,
   type TreeSpot,
 } from '@red-attack/shared';
@@ -207,6 +209,10 @@ export class GameRoom extends Room {
       vampireBombs: 0,
       vampireReturning: false,
       vampireReloadAt: 0,
+      // The free stations and an empty purse: a bomber is something he has to earn
+      // out of the horde, not something the fort hands over for nothing.
+      credits: STARTING_CREDITS,
+      unlocked: defaultLoadout(),
       lastInput: Date.now(),
       hmgFireAcc: perGun(0),
       hmgLastShotAt: perGun(0),
@@ -525,7 +531,7 @@ export class GameRoom extends Room {
     st.burning = true;
 
     if (st.hp > 0) {
-      if (player) player.score += Math.round(spec.score * ARMOUR_HIT_SCORE_SHARE);
+      if (player) this.award(player, Math.round(spec.score * ARMOUR_HIT_SCORE_SHARE));
       this.broadcastEvent({
         type: 'structure_hit', structureId: st.id, kind: st.kind, variant: st.variant,
         position: { x: st.x, y: st.cy, z: st.z }, hp: st.hp, maxHp: st.maxHp,
@@ -537,7 +543,7 @@ export class GameRoom extends Room {
     // What is left of it is a smoking heap a metre or so high now.
     st.hy = Math.min(st.hy, 1.2);
     st.cy = st.hy;
-    if (player) player.score += spec.score;
+    if (player) this.award(player, spec.score);
     this.broadcastEvent({
       type: 'structure_destroyed', structureId: st.id, kind: st.kind, variant: st.variant,
       killerId, position: { x: st.x, y: 0, z: st.z }, score: spec.score,
@@ -671,7 +677,7 @@ export class GameRoom extends Room {
     }
     if (kills >= MULTI_KILL_THRESHOLD) {
       const player = this.players.get(shell.ownerId);
-      if (player) player.score += MULTI_KILL_BONUS;
+      if (player) this.award(player, MULTI_KILL_BONUS);
     }
     this.broadcastEvent({
       type: 'explosion', position: { ...shell.impact },
@@ -764,7 +770,7 @@ export class GameRoom extends Room {
     }
     if (kills >= MULTI_KILL_THRESHOLD) {
       const player = this.players.get(bomb.ownerId);
-      if (player) player.score += MULTI_KILL_BONUS;
+      if (player) this.award(player, MULTI_KILL_BONUS);
     }
     this.broadcastEvent({
       type: 'explosion', position: { ...bomb.impact },
@@ -1051,7 +1057,7 @@ export class GameRoom extends Room {
     }
     if (kills >= MULTI_KILL_THRESHOLD) {
       const player = this.players.get(drone.ownerId);
-      if (player) player.score += MULTI_KILL_BONUS;
+      if (player) this.award(player, MULTI_KILL_BONUS);
     }
     // The quad detonates on contact whether or not the target went with it: an
     // armoured kill costs the pilot a drone either way.
@@ -1078,7 +1084,7 @@ export class GameRoom extends Room {
     if (enemy.hp > 0) {
       if (!heavy) return false;
       enemy.burning = true;
-      if (player) player.score += Math.round(stats.score * ARMOUR_HIT_SCORE_SHARE);
+      if (player) this.award(player, Math.round(stats.score * ARMOUR_HIT_SCORE_SHARE));
       this.broadcastEvent({
         type: 'enemy_hit', enemyId: enemy.id, enemyType: enemy.type, killerId,
         position: { ...enemy.position }, hp: enemy.hp, maxHp: enemy.maxHp, burning: true,
@@ -1089,7 +1095,7 @@ export class GameRoom extends Room {
     enemy.dead = true;
     enemy.deathTime = this.serverTime;
     this.kills++;
-    if (player) player.score += stats.score;
+    if (player) this.award(player, stats.score);
     this.broadcastEvent({
       type: 'enemy_killed', enemyId: enemy.id, enemyType: enemy.type, killerId,
       position: { ...enemy.position },
@@ -1129,9 +1135,23 @@ export class GameRoom extends Room {
       case 'select_weapon': {
         // Swapping stations is free and always allowed. A pilot mid-flight keeps
         // flying the quad they already have; the choice only gates what the next
-        // launch does.
+        // launch does. Free to swap, but not free to borrow: a station the armory
+        // sells stays dead until its price has been paid, and since the launch and
+        // the bomb drop both read player.weapon, gating the choice gates the
+        // aircraft with it.
         const gun = hmgGunOf(msg.weapon);
         if (msg.weapon === WeaponType.FPV || msg.weapon === WeaponType.VAMPIRE || msg.weapon === WeaponType.MORTAR || gun >= 0) {
+          if (!weaponIsUnlocked(msg.weapon, player.unlocked)) {
+            // Sent down the same 'event' channel the room broadcasts use, but to him
+            // alone: his HUD flashes the price, nobody else's screen reacts.
+            this.send(client, 'event', {
+              type: 'purchase_denied',
+              item: shopItemFor(msg.weapon)?.item ?? ShopItem.VAMPIRE,
+              reason: 'locked',
+              credits: player.credits,
+            });
+            break;
+          }
           player.weapon = msg.weapon;
           if (gun >= 0) {
             // Taking over a crew starts from the lay that crew was holding, and
@@ -1200,6 +1220,37 @@ export class GameRoom extends Room {
             this.dropBomb(player, drone);
           }
         }
+        break;
+      }
+      case 'purchase': {
+        // The armory. The client names a catalogue row and nothing else — the price
+        // comes from the server's own copy of the catalogue, so a tampered browser
+        // cannot ask for a bomber at a tenth of what it costs, and cannot ask for a
+        // row that does not exist at all.
+        const spec = shopItemByKey(msg.item);
+        if (!spec) break;
+        // Nothing changes hands while the fort is still being drawn up or after it
+        // has fallen: a purchase is a decision made under the horde, not in the lobby.
+        if (this.phase !== GamePhase.PLAYING) {
+          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'closed', credits: player.credits });
+          break;
+        }
+        if (spec.weapon && player.unlocked.includes(spec.weapon)) {
+          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'owned', credits: player.credits });
+          break;
+        }
+        if (player.credits < spec.cost) {
+          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'credits', credits: player.credits });
+          break;
+        }
+        player.credits -= spec.cost;
+        if (spec.weapon) player.unlocked.push(spec.weapon);
+        // Everyone hears about it: the row goes to OWNED on every screen, and the
+        // room knows who just walked out with a bomber.
+        this.broadcastEvent({
+          type: 'purchase', buyerId: player.id, item: spec.item,
+          cost: spec.cost, credits: player.credits,
+        });
         break;
       }
       case 'drone_input':
@@ -1282,6 +1333,17 @@ export class GameRoom extends Room {
   }
 
   /**
+   * Pay a pilot for some damage: the score keeps the record of what he achieved,
+   * and the credits are the part of it he can spend at the armory. Every payout in
+   * the room goes through here so the two ledgers can never drift apart, and a
+   * future change to what kills are worth in credits is one line.
+   */
+  private award(player: InternalPlayer, points: number) {
+    player.score += points;
+    player.credits += Math.round(points * CREDIT_PAYOUT);
+  }
+
+  /**
    * A gun that has not been fired for HMG_RELOAD_TIME seconds has a full belt in it
    * again: the crew that was not shooting spent that time hooking a fresh can up to
    * the feed tray. One rule covers both cases that matter — a belt run empty, and a
@@ -1359,6 +1421,7 @@ export class GameRoom extends Room {
         manningGun: p.manningGun, hmgYaw: p.hmgYaw, hmgPitch: p.hmgPitch,
         vampireBombs: p.vampireBombs, vampireReturning: p.vampireReturning,
         vampireReloadAt: p.vampireReloadAt,
+        credits: p.credits, unlocked: p.unlocked,
       })),
       serverTime: this.serverTime,
     };

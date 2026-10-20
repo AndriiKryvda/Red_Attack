@@ -17,6 +17,30 @@
     #hud .wave-info { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 18px; text-align: center; }
     #hud .drone-status { position: absolute; top: 20px; right: 20px; color: #fff; font-size: 14px; text-align: right; }
     #hud .score { position: absolute; top: 50px; right: 20px; color: #ffd700; font-size: 16px; }
+    #hud .credits { position: absolute; top: 74px; right: 20px; color: #7fd4a0; font-size: 13px; letter-spacing: 1px; }
+    #hud .credits b { color: #ffd700; font-size: 15px; }
+    #hud .wp-row.locked { opacity: 0.42; }
+    #hud .wp-row.locked .wp-state { color: #ff8a8a; }
+    #hud .shop-panel { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); background: rgba(0,0,0,0.84); border: 1px solid rgba(255,215,0,0.55); border-radius: 8px; padding: 14px 18px; color: #cfe8ff; font-size: 13px; min-width: 460px; z-index: 20; }
+    #hud .shop-panel.hidden { display: none; }
+    #hud .shop-panel .sp-title { display: flex; justify-content: space-between; gap: 14px; color: #fff; font-weight: bold; letter-spacing: 2px; border-bottom: 1px solid rgba(255,255,255,0.25); padding-bottom: 6px; margin-bottom: 8px; }
+    #hud .shop-panel .sp-title small { color: #8fd18f; font-weight: normal; letter-spacing: 0; }
+    #hud .shop-panel .sp-purse { color: #7fd4a0; margin-bottom: 10px; letter-spacing: 1px; }
+    #hud .shop-panel .sp-purse b { color: #ffd700; font-size: 17px; }
+    #hud .shop-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-left: 3px solid transparent; border-radius: 4px; cursor: pointer; }
+    #hud .shop-row:hover { background: rgba(255,255,255,0.08); }
+    #hud .shop-row .sp-key { width: 18px; text-align: center; border: 1px solid rgba(255,255,255,0.45); border-radius: 3px; font-size: 11px; }
+    #hud .shop-row .sp-name { flex: 1; letter-spacing: 1px; }
+    #hud .shop-row .sp-name small { display: block; color: #8a8a8a; letter-spacing: 0; font-size: 11px; }
+    #hud .shop-row .sp-cost { color: #ffd700; min-width: 58px; text-align: right; }
+    #hud .shop-row .sp-state { min-width: 84px; text-align: right; font-size: 11px; }
+    #hud .shop-row.affordable { border-left-color: #4caf50; }
+    #hud .shop-row.affordable .sp-state { color: #8fd18f; }
+    #hud .shop-row.expensive { opacity: 0.55; }
+    #hud .shop-row.expensive .sp-state { color: #ff8a8a; }
+    #hud .shop-row.owned { opacity: 0.6; cursor: default; }
+    #hud .shop-row.owned .sp-state { color: #9fe8ff; }
+    #hud .shop-row.owned .sp-cost { color: #8a8a8a; text-decoration: line-through; }
     #hud .announcement { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #ff4444; font-size: 48px; font-weight: bold; text-shadow: 2px 2px 4px #000; opacity: 0; transition: opacity 0.5s; }
     #hud .announcement.show { opacity: 1; }
     #hud .crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.7); border-radius: 50%; display: none; }
@@ -79,6 +103,7 @@
     <div class="wave-info" id="wave-info">Horde incoming…</div>
     <div class="drone-status" id="drone-status">Press SPACE to launch</div>
     <div class="score" id="score-display">Score: 0</div>
+    <div class="credits" id="credits-display">CREDITS <b>0</b></div>
     <div class="weapon-panel" id="weapon-panel">
       <div class="wp-title">WEAPON<small>1 – 7 / Tab</small></div>
       <div class="wp-row" id="wp-fpv"><span class="wp-key">1</span><span class="wp-name">FPV DRONE</span><span class="wp-state" id="wp-fpv-state">READY</span></div>
@@ -91,6 +116,11 @@
     </div>
     <div class="room-code" id="room-code-display"></div>
     <div class="announcement" id="announcement"></div>
+    <div class="shop-panel hidden" id="shop-panel">
+      <div class="sp-title">ARMORY<small>B to close · hotkey to buy</small></div>
+      <div class="sp-purse">CREDITS <b id="sp-credits">0</b></div>
+      <div id="shop-rows"></div>
+    </div>
     <div class="crosshair" id="crosshair"></div>
     <div class="compass">
       <div class="compass-rose" id="compass-rose">
@@ -118,6 +148,7 @@
       <div class="kg-row"><span class="kg-keys"><kbd>LMB</kbd></span><span>Boost / fire mortar / drop bomb (Vampire)</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>R</kbd></span><span>Self-destruct</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>F</kbd></span><span>Drop mini-bomb (Vampire, alt.)</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>B</kbd></span><span>Armory: buy weapons with earned credits</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>M</kbd></span><span>Sound on / off</span></div>
     </div>
   </div>

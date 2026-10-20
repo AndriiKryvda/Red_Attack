@@ -1,5 +1,8 @@
 import { StructureKind, StructureVariant } from './structures.js';
 import { WeaponType } from './mortar.js';
+// Type-only on purpose: economy.js reaches back into the weapon and nest tables, so
+// pulling it in as a value would close a load-order loop between the modules.
+import type { ShopItem } from './economy.js';
 
 
 // ─── Enemy Types ───────────────────────────────────────────
@@ -147,6 +150,18 @@ export interface PlayerData {
   vampireBombs: number;
   vampireReturning: boolean;
   vampireReloadAt: number;
+  /**
+   * Spendable earnings. Credits are paid out alongside the score for every kill
+   * and spent at the armory; unlike the score they go down when a pilot buys, which
+   * is what keeps the scoreboard a record of damage rather than a wallet.
+   */
+  credits: number;
+  /**
+   * The stations this pilot may man. Everyone starts on the free loadout (see
+   * `defaultLoadout`); a station the shop sells only joins this list once it has
+   * been paid for, and the server refuses to hand over one that is not in it.
+   */
+  unlocked: WeaponType[];
 }
 
 // ─── Horde ───────────────────────────────────────────
@@ -242,6 +257,16 @@ export interface HmgInputMsg {
   firing: boolean;
 }
 
+/**
+ * Buy a station out of the armory with the credits this pilot has earned. The
+ * client only names the catalogue row it wants: the server looks the price up
+ * itself, so a tampered browser cannot ask for a bomber at a tenth of its cost.
+ */
+export interface PurchaseMsg {
+  type: 'purchase';
+  item: ShopItem;
+}
+
 export type ClientMessage =
   | LaunchDroneMsg
   | DroneInputMsg
@@ -251,7 +276,8 @@ export type ClientMessage =
   | SelectWeaponMsg
   | MortarFireMsg
   | VampireDropMsg
-  | HmgInputMsg;
+  | HmgInputMsg
+  | PurchaseMsg;
 
 // ─── Server → Client Events ───────────────────────────────
 export interface ExplosionEvent {
@@ -374,6 +400,32 @@ export interface GameOverEvent {
   scores: Record<string, number>;
 }
 
+/**
+ * A pilot paid for a station out of the armory. Broadcast to the whole room so
+ * every screen can mark the row bought and shout who picked it up; `credits` is
+ * what the buyer has left, so his own HUD can settle on the new purse at once
+ * rather than waiting on the next state snapshot.
+ */
+export interface PurchaseEvent {
+  type: 'purchase';
+  buyerId: string;
+  item: ShopItem;
+  /** What it cost him, for the announcement. */
+  cost: number;
+  /** His balance after paying. */
+  credits: number;
+}
+
+/** The armory said no, and why. Only ever sent to the pilot who asked. */
+export interface PurchaseDeniedEvent {
+  type: 'purchase_denied';
+  item: ShopItem;
+  /** credits: not enough in the purse; owned: already bought; closed: not while the fort is falling; locked: station not paid for. */
+  reason: 'credits' | 'owned' | 'closed' | 'locked';
+  /** What he actually has, so the HUD can show how much more he is short. */
+  credits: number;
+}
+
 export type ServerEvent =
   | ExplosionEvent
   | MortarFireEvent
@@ -387,4 +439,6 @@ export type ServerEvent =
   | HordeStartEvent
   | ThreatLevelEvent
   | EnemyBreachEvent
+  | PurchaseEvent
+  | PurchaseDeniedEvent
   | GameOverEvent;

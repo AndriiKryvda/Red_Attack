@@ -1,5 +1,5 @@
 import { Client, Room } from '@colyseus/sdk';
-import { GameState, ServerEvent, WeaponType, MAX_PLAYERS, Difficulty } from '@red-attack/shared';
+import { GameState, ServerEvent, WeaponType, ShopItem, MAX_PLAYERS, Difficulty } from '@red-attack/shared';
 
 export class NetworkClient {
   private client: Client;
@@ -80,6 +80,15 @@ export class NetworkClient {
   /** Swap the pilot between the quad and the tube - immediate, no rate limit. */
   sendSelectWeapon(weapon: WeaponType) {
     if (this.room) this.room.send('select_weapon', { type: 'select_weapon', weapon });
+  }
+
+  /**
+   * Buy a station out of the armory. Immediate rather than rate-limited: a purchase
+   * is a single deliberate click, and the server is the one that decides whether the
+   * pilot can actually afford it, so a double-tap can only ever come back denied.
+   */
+  sendPurchase(item: ShopItem) {
+    if (this.room) this.room.send('purchase', { type: 'purchase', item });
   }
 
   /** Drop a shell on a spot of the field; the server clamps it into the ring of fire. */

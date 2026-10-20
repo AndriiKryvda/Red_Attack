@@ -6,6 +6,7 @@ import { audio } from './audio/AudioManager';
 import {
   ENEMY_DISPLAY_NAMES, STRUCTURE_SPECS, WeaponType, PlayerState,
   HMG_NESTS, HMG_WEAPONS, hmgGunOf, Difficulty,
+  ShopItemSpec, shopItemByKey, shopItemByHotkey, shopItemFor, weaponIsUnlocked, defaultLoadout,
 } from '@red-attack/shared';
 
 // ─── Bootstrap ─────────────────────────────────────────────
@@ -44,11 +45,29 @@ const WEAPON_CYCLE: WeaponType[] = [
 ];
 
 /**
+ * Whether this pilot may man a station. Until the server's first state arrives he
+ * holds only the free loadout, which is the honest answer: the armory has not sold
+ * him anything yet, and the server would refuse the request anyway.
+ */
+function isUnlocked(weapon: WeaponType): boolean {
+  return weaponIsUnlocked(weapon, localPlayer()?.unlocked ?? defaultLoadout());
+}
+
+/**
  * Take a station: tell the server, and hand the controls over to that station. On a
  * gun the mouse lays the barrel instead of looking around the fort, so the input
- * layer has to know the pilot is no longer just standing about.
+ * layer has to know the pilot is no longer just standing about. A station he has not
+ * paid for is refused here rather than sent: the key does nothing at all, which is
+ * what a locked station should feel like, and the server would say no regardless.
  */
 function selectWeapon(weapon: WeaponType): void {
+  if (!isUnlocked(weapon)) {
+    // Say so rather than dying silently: the key was pressed with intent, and the
+    // price is the answer the pilot needs. Printed locally, since nothing went out.
+    const spec = shopItemFor(weapon);
+    if (spec) hud.showAnnouncement(`✖ ${spec.label}: LOCKED · ${spec.cost}`);
+    return;
+  }
   network.sendSelectWeapon(weapon);
   const gun = hmgGunOf(weapon);
   input.setHmgMode(gun >= 0);
@@ -113,10 +132,36 @@ input.onSelfDestruct = () => { network.sendSelfDestruct(); };
 input.onToggleKeysGuide = () => { hud.toggleKeysGuide(); };
 input.onSelectWeapon = (weapon) => { selectWeapon(weapon); };
 input.onCycleWeapon = () => {
-  const at = WEAPON_CYCLE.indexOf(localPlayer()?.weapon ?? WeaponType.FPV);
-  const next = WEAPON_CYCLE[(at + 1) % WEAPON_CYCLE.length];
-  selectWeapon(next);
+  // Tab walks the stations this pilot actually holds, so a bought bomber joins the
+  // rotation and a locked one is never stepped on.
+  const held = WEAPON_CYCLE.filter(isUnlocked);
+  if (held.length === 0) return;
+  const at = held.indexOf(localPlayer()?.weapon ?? WeaponType.FPV);
+  selectWeapon(held[(at + 1) % held.length]);
 };
+
+// ─── The armory ────────────────────────────────────────────
+// B raises the panel; while it is up the input layer goes quiet and the number keys
+// buy instead of changing stations. The purchase itself is only a request — the
+// server holds the purse strings and answers with either a receipt or a refusal.
+function setShopOpen(open: boolean) {
+  hud.setShopOpen(open);
+  input.setShopMode(open);
+}
+
+function buy(spec: ShopItemSpec) {
+  network.sendPurchase(spec.item);
+}
+
+input.onToggleShop = () => {
+  if (!gameStarted) return;
+  setShopOpen(!hud.shopIsOpen);
+};
+input.onShopBuy = (hotkey) => {
+  const spec = shopItemByHotkey(hotkey);
+  if (spec) buy(spec);
+};
+hud.onShopBuy = (spec) => { buy(spec); };
 
 // The browser drops the mouse capture whenever the window loses focus; the
 // InputManager wins it back on return, and asks for this hint when it needs a
@@ -271,6 +316,26 @@ network.onEvent((event) => {
     if (event.leaks % 10 === 0) hud.showAnnouncement(`☠ ${event.leaks} BREACHES`);
   } else if (event.type === 'game_over') {
     hud.showAnnouncement(event.victory ? '🎉 VICTORY!' : '💀 DEFEAT');
+  } else if (event.type === 'purchase') {
+    // A receipt. The buyer's own screen shuts the armory — the money is spent and
+    // there is nothing left to read — while everyone else just hears who came by.
+    const label = shopItemByKey(event.item)?.label ?? event.item;
+    if (event.buyerId === network.sessionId) {
+      setShopOpen(false);
+      hud.showAnnouncement(`✔ ${label} ACQUIRED`);
+    } else {
+      const buyer = network.getState()?.players.find(p => p.id === event.buyerId);
+      hud.showAnnouncement(`${buyer?.name ?? 'A PILOT'} BOUGHT ${label}`);
+    }
+  } else if (event.type === 'purchase_denied') {
+    const spec = shopItemByKey(event.item);
+    const label = spec?.label ?? event.item;
+    const why = event.reason === 'credits'
+      ? `SHORT ${Math.max(0, (spec?.cost ?? 0) - event.credits)}`
+      : event.reason === 'owned' ? 'ALREADY YOURS'
+        : event.reason === 'closed' ? 'ARMORY CLOSED'
+          : `LOCKED · ${spec?.cost ?? 0}`;
+    hud.showAnnouncement(`✖ ${label}: ${why}`);
   }
 });
 

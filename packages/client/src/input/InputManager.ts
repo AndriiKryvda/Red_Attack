@@ -1,4 +1,4 @@
-import { WeaponType, clampHmgPitch } from '@red-attack/shared';
+import { WeaponType, clampHmgPitch, shopItemByHotkey } from '@red-attack/shared';
 
 export interface InputState {
   forward: number;
@@ -38,6 +38,12 @@ export class InputManager {
   private mouseDown: boolean = false;
   /** True while the Vampire's bomb-release key (F) is held. */
   private bombDropHeld: boolean = false;
+  /**
+   * True while the armory panel is up. Reading it is a deliberate pause: nothing in
+   * the fort responds until it is shut again, so a pilot cannot fly and shop at the
+   * same time — and the number keys buy instead of changing stations.
+   */
+  private shopMode: boolean = false;
 
   // Pointer-lock bookkeeping. A browser drops the pointer lock the moment the
   // window or tab loses focus, so the game has to win it back when the player
@@ -69,6 +75,14 @@ export class InputManager {
   onSelectWeapon: ((weapon: WeaponType) => void) | null = null;
   /** Flip to the other weapon without naming it (Tab). */
   onCycleWeapon: (() => void) | null = null;
+  /** Open or shut the armory (B). */
+  onToggleShop: (() => void) | null = null;
+  /**
+   * Buy the catalogue row whose hotkey was pressed while the armory was open. The
+   * hotkey belongs to the row, not to the input layer, so a new item can be sold
+   * without touching these bindings.
+   */
+  onShopBuy: ((hotkey: string) => void) | null = null;
   /** Tells the UI to show/hide the "click to resume mouse look" hint. */
   onLockHintChange: ((show: boolean) => void) | null = null;
 
@@ -115,6 +129,18 @@ export class InputManager {
         return;
       }
       if (e.repeat) return;
+
+      // The armory is a deliberate pause. While it is up the fort hears nothing at
+      // all: gameplay keys are not even recorded, so a held W cannot keep flying a
+      // drone while the pilot reads prices. B shuts the panel again, and the number
+      // keys buy the row they are printed on instead of changing stations.
+      if (e.code === 'KeyB') { this.onToggleShop?.(); return; }
+      if (this.shopMode) {
+        const spec = shopItemByHotkey(InputManager.digitOf(e.code));
+        if (spec) this.onShopBuy?.(spec.hotkey);
+        return;
+      }
+
       this.keys.add(e.code);
       if (e.code === 'Space') {
         e.preventDefault();
@@ -178,6 +204,9 @@ export class InputManager {
 
     document.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
+      // The armory swallows the click too: shutting it is the B key's job, and a
+      // stray click must not fire a shell or drop a bomb behind the panel.
+      if (this.shopMode) return;
       this.mouseDown = true;
       this.trigger = true;
       // While manning the Vampire the left button is the bomb release: one click,
@@ -405,6 +434,28 @@ export class InputManager {
 
   get inHmgMode(): boolean { return this.hmgMode; }
 
+  /**
+   * Raise or shut the armory. Either way the held input is flushed the same way
+   * losing the window flushes it: a key or button that was down when the panel came
+   * up must not still be down after it goes back down.
+   */
+  setShopMode(on: boolean) {
+    if (on === this.shopMode) return;
+    this.shopMode = on;
+    this.keys.clear();
+    this.mouseDown = false;
+    this.trigger = false;
+    this.bombDropHeld = false;
+  }
+
+  get shopIsOpen(): boolean { return this.shopMode; }
+
+  /** The digit a key press carries, or '' when it carries none. */
+  private static digitOf(code: string): string {
+    const m = /^Digit(\d)$/.exec(code) ?? /^Numpad(\d)$/.exec(code);
+    return m ? m[1] : '';
+  }
+
   /** The lay the gunner is holding, and whether his hand is on the trigger. */
   getHmgAim(): HmgAim {
     return { yaw: this.hmgYaw, pitch: this.hmgPitch, firing: this.trigger };
@@ -420,6 +471,14 @@ export class InputManager {
   }
 
   getState(): InputState {
+    // While the armory is up the fort is deaf: no thrust, no yaw, no trigger. The
+    // clock still advances so that closing the panel does not read as one long frame.
+    if (this.shopMode) {
+      this.lastStateTime = performance.now();
+      this.pendingYawDelta = 0;
+      return { forward: 0, yawDelta: 0, pitch: this.pitch, up: 0, boost: false, bombDrop: false };
+    }
+
     let forward = 0;
     let up = 0;
 

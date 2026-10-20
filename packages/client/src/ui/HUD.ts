@@ -1,4 +1,4 @@
-import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf, DIFFICULTY_LABELS } from '@red-attack/shared';
+import { GameState, PlayerState, DroneData, PlayerData, WeaponType, HMG_NESTS, hmgGunOf, DIFFICULTY_LABELS, SHOP_CATALOG, ShopItemSpec, shopItemFor, weaponIsUnlocked } from '@red-attack/shared';
 
 export class HUD {
   private breachDisplay: HTMLElement;
@@ -8,6 +8,7 @@ export class HUD {
   private waveInfo: HTMLElement;
   private droneStatus: HTMLElement;
   private scoreDisplay: HTMLElement;
+  private creditsDisplay: HTMLElement;
   private announcement: HTMLElement;
   private crosshair: HTMLElement;
   private roomCodeDisplay: HTMLElement;
@@ -30,6 +31,18 @@ export class HUD {
   private keysGuide: HTMLElement;
   private kgLaunch: HTMLElement;
   private keysGuideVisible: boolean;
+  /**
+   * The armory panel and the row built for each catalogue entry. The rows are built
+   * once from the shared catalogue, so a weapon added server-side shows up here
+   * without a single line of markup changing.
+   */
+  private shopPanel: HTMLElement;
+  private shopRowsEl: HTMLElement;
+  private spCredits: HTMLElement;
+  private shopRows: { spec: ShopItemSpec; el: HTMLElement; state: HTMLElement }[] = [];
+  private shopVisible: boolean = false;
+  /** Fired when a shop row is clicked; main.ts turns it into a purchase message. */
+  onShopBuy: ((spec: ShopItemSpec) => void) | null = null;
   private announceTimeout: ReturnType<typeof setTimeout> | null = null;
   private static readonly KEYS_GUIDE_PREF = 'red-attack:keys-guide';
 
@@ -39,6 +52,7 @@ export class HUD {
     this.waveInfo = document.getElementById('wave-info')!;
     this.droneStatus = document.getElementById('drone-status')!;
     this.scoreDisplay = document.getElementById('score-display')!;
+    this.creditsDisplay = document.getElementById('credits-display')!;
     this.announcement = document.getElementById('announcement')!;
     this.crosshair = document.getElementById('crosshair')!;
     this.roomCodeDisplay = document.getElementById('room-code-display')!;
@@ -68,6 +82,35 @@ export class HUD {
     this.kgLaunch = document.getElementById('kg-launch')!;
     this.keysGuideVisible = HUD.readKeysGuidePref();
     this.applyKeysGuide();
+    this.shopPanel = document.getElementById('shop-panel')!;
+    this.shopRowsEl = document.getElementById('shop-rows')!;
+    this.spCredits = document.getElementById('sp-credits')!;
+    this.buildShop();
+  }
+
+  /**
+   * Build the armory rows from the shared catalogue. Each row carries the price the
+   * server charges for it, so the panel can never advertise something the fort will
+   * not sell at that figure.
+   */
+  private buildShop() {
+    for (const spec of SHOP_CATALOG) {
+      const row = document.createElement('div');
+      row.className = 'shop-row';
+      row.innerHTML = `<span class="sp-key">${spec.hotkey}</span>`
+        + `<span class="sp-name">${spec.label}<small>${spec.desc}</small></span>`
+        + `<span class="sp-cost">${spec.cost}</span>`
+        + `<span class="sp-state">—</span>`;
+      row.addEventListener('click', () => {
+        if (row.classList.contains('owned')) return;
+        this.onShopBuy?.(spec);
+      });
+      this.shopRowsEl.appendChild(row);
+      this.shopRows.push({
+        spec, el: row,
+        state: row.querySelector('.sp-state') as HTMLElement,
+      });
+    }
   }
 
   update(state: GameState | null, localSessionId: string, heading = 0) {
@@ -147,6 +190,11 @@ export class HUD {
       }
       this.updateWeaponPanel(player, mortarWait, droneWait, hmgGun, hmgWait, vampireRearm);
       this.scoreDisplay.textContent = `Score: ${player.score}`;
+      // The purse sits under the score: the score is what he did, the credits are
+      // what he has not spent yet. They tick up together and only ever diverge when
+      // he buys something.
+      this.creditsDisplay.innerHTML = `CREDITS <b>${player.credits ?? 0}</b>`;
+      this.renderShop(player);
 
       // Key guide: pulse the Space row while a launch is available.
       this.kgLaunch.classList.toggle('on', player.state !== PlayerState.PILOTING);
@@ -192,14 +240,20 @@ export class HUD {
     this.wpFpv.classList.toggle('cool', fpvOn && droneWait > 0);
     this.wpMortar.classList.toggle('cool', mortarWait > 0);
     // The Vampire row: how many mini-bombs are left in the stack, or what the
-    // autopilot is doing on the way home to re-arm.
+    // autopilot is doing on the way home to re-arm. Until it is paid for the row
+    // shows its price instead — the key is dead, and the panel says why.
+    const vampireOwned = weaponIsUnlocked(WeaponType.VAMPIRE, player.unlocked ?? []);
+    const vampireCost = shopItemFor(WeaponType.VAMPIRE)?.cost ?? 0;
+    this.wpVampire.classList.toggle('locked', !vampireOwned);
     this.wpVampire.classList.toggle('on', vampireOn);
     this.wpVampire.classList.toggle('cool', vampireOn && !!player.vampireReturning);
-    this.wpVampireState.textContent = (!vampireOn || !piloting)
-      ? 'READY'
-      : player.vampireReturning
-        ? (vampireRearm > 0 ? `REARM ${vampireRearm}s` : 'RETURNING')
-        : `${player.vampireBombs ?? 0} BOMBS`;
+    this.wpVampireState.textContent = !vampireOwned
+      ? `LOCKED · ${vampireCost}`
+      : (!vampireOn || !piloting)
+        ? 'READY'
+        : player.vampireReturning
+          ? (vampireRearm > 0 ? `REARM ${vampireRearm}s` : 'RETURNING')
+          : `${player.vampireBombs ?? 0} BOMBS`;
     // The four guns: whose trigger is manned, and what is left in each belt. An
     // empty one shows the swap countdown instead of a number.
     for (let i = 0; i < this.wpHmg.length; i++) {
@@ -214,6 +268,41 @@ export class HUD {
   toggleKeysGuide() {
     this.keysGuideVisible = !this.keysGuideVisible;
     this.applyKeysGuide();
+  }
+
+  /** Open or shut the armory (bound to the B key). */
+  setShopOpen(open: boolean) {
+    this.shopVisible = open;
+    this.shopPanel.classList.toggle('hidden', !open);
+  }
+
+  toggleShop() {
+    this.setShopOpen(!this.shopVisible);
+  }
+
+  get shopIsOpen(): boolean { return this.shopVisible; }
+
+  /**
+   * Settle every armory row against what this pilot holds: bought, affordable, or
+   * short by however much the panel spells out. It runs off the server's own
+   * credits and unlock list, so the shop never offers what the server would refuse.
+   */
+  private renderShop(player: PlayerData) {
+    if (!this.shopVisible) return;
+    const credits = player.credits ?? 0;
+    const unlocked = player.unlocked ?? [];
+    this.spCredits.textContent = `${credits}`;
+    for (const row of this.shopRows) {
+      const owned = !!row.spec.weapon && unlocked.includes(row.spec.weapon);
+      const short = Math.max(0, row.spec.cost - credits);
+      row.el.classList.toggle('owned', owned);
+      row.el.classList.toggle('affordable', !owned && short === 0);
+      row.el.classList.toggle('expensive', !owned && short > 0);
+      row.el.title = owned ? `${row.spec.label} — already yours` : `Buy ${row.spec.label} for ${row.spec.cost} credits`;
+      row.state.textContent = owned
+        ? 'OWNED'
+        : (short === 0 ? 'AFFORDABLE' : `SHORT ${short}`);
+    }
   }
 
   private applyKeysGuide() {

@@ -12,6 +12,10 @@
     #hud .breach { position: absolute; top: 20px; left: 20px; color: #fff; font-size: 26px; font-weight: bold; line-height: 1; text-shadow: 2px 2px 4px #000; transition: color 0.25s, transform 0.25s; }
     #hud .breach small { display: block; margin-top: 4px; color: #bbb; font-size: 11px; font-weight: normal; letter-spacing: 2px; }
     #hud .breach.flash { color: #ff5252; transform: scale(1.2); }
+    #hud .fps { position: absolute; top: 78px; left: 20px; color: #8fd18f; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; letter-spacing: 1px; text-shadow: 1px 1px 2px #000; opacity: 0.85; }
+    #hud .fps.hidden { display: none; }
+    #hud .fps.mid { color: #ffb04a; }
+    #hud .fps.low { color: #ff5252; }
     #breach-flash { position: fixed; inset: 0; pointer-events: none; z-index: 15; opacity: 0; transition: opacity 0.5s ease-out; box-shadow: inset 0 0 170px 45px rgba(255,0,0,0.55); }
     #breach-flash.show { opacity: 1; transition: opacity 0.05s ease-in; }
     #hud .wave-info { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 18px; text-align: center; }
@@ -100,6 +104,7 @@
   <canvas id="game-canvas"></canvas>
   <div id="hud">
     <div class="breach" id="breach-display">0<small>BREACHES</small></div>
+    <div class="fps" id="fps-display">-- FPS</div>
     <div class="wave-info" id="wave-info">Horde incoming…</div>
     <div class="drone-status" id="drone-status">Press SPACE to launch</div>
     <div class="score" id="score-display">Score: 0</div>
@@ -153,6 +158,7 @@
       <div class="kg-row"><span class="kg-keys"><kbd>F</kbd></span><span>Drop mini-bomb (Vampire, alt.)</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>B</kbd></span><span>Armory: buy weapons with earned credits</span></div>
       <div class="kg-row"><span class="kg-keys"><kbd>M</kbd></span><span>Sound on / off</span></div>
+      <div class="kg-row"><span class="kg-keys"><kbd>F3</kbd></span><span>Toggle FPS counter</span></div>
     </div>
   </div>
   <div id="breach-flash"></div>

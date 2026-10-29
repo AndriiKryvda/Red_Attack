@@ -105,7 +105,7 @@ export class GameScene {
     const sun = new THREE.DirectionalLight(0xfff2e0, 2.4);
     sun.position.set(50, 80, 30);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 200;
     sun.shadow.camera.left = -80;

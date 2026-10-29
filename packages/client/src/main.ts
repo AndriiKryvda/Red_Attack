@@ -130,6 +130,7 @@ input.onFireMouse = () => {
 input.onDropBomb = () => { network.sendVampireDrop(); };
 input.onSelfDestruct = () => { network.sendSelfDestruct(); };
 input.onToggleKeysGuide = () => { hud.toggleKeysGuide(); };
+input.onToggleFps = () => { hud.toggleFps(); };
 input.onSelectWeapon = (weapon) => { selectWeapon(weapon); };
 input.onCycleWeapon = () => {
   // Tab walks the stations this pilot actually holds, so a bought bomber joins the
@@ -261,12 +262,32 @@ btnJoin.addEventListener('click', async () => {
 
 // ─── Game Loop ─────────────────────────────────────────────
 let lastTime = performance.now();
+// FPS is counted over ~0.5s windows off the raw rAF clock (not the clamped dt), so
+// the readout stays steady and a single alt-tab stall never drags the average down.
+let fpsFrames = 0;
+let fpsLastTime = performance.now();
+// Worst (longest) frame time seen in the current 0.5s window, in ms — the number
+// that exposes a hitch an average frame rate hides.
+let fpsWorstMs = 0;
 
 function gameLoop(time: number) {
   // requestAnimationFrame is paused while the tab is hidden, so the first frame
   // after alt-tabbing back reports a huge elapsed time — clamp it.
-  const dt = Math.min(0.1, (time - lastTime) / 1000);
+  const rawMs = time - lastTime;
+  const dt = Math.min(0.1, rawMs / 1000);
   lastTime = time;
+
+  // FPS readout: count frames and refresh the HUD twice a second. The worst frame
+  // time in the window is tracked alongside the average, because a healthy average
+  // hides the occasional long frame that reads on screen as a stutter or hitch.
+  fpsFrames++;
+  if (rawMs > fpsWorstMs && rawMs < 1000) fpsWorstMs = rawMs;
+  if (time - fpsLastTime >= 500) {
+    hud.setFps(Math.round((fpsFrames * 1000) / (time - fpsLastTime)), Math.round(fpsWorstMs));
+    fpsFrames = 0;
+    fpsWorstMs = 0;
+    fpsLastTime = time;
+  }
 
   if (gameStarted) {
     // Send continuous input to server (rate-limited internally)

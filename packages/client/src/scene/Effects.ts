@@ -2,14 +2,24 @@ import * as THREE from 'three';
 import { ENEMY_STATS, EnemyType } from '@red-attack/shared';
 import { createGolfCartWreck, createMotorcyclistWreck, createTankWreck } from './VehicleModels';
 
+type ParticleShape = 'box' | 'sphere';
+
 interface Particle {
   mesh: THREE.Mesh;
-  velocity: THREE.Vector3;
+  // Velocity kept as plain numbers, not a Vector3, so a busy field neither
+  // allocates a vector per particle at spawn nor clones one every frame.
+  vx: number;
+  vy: number;
+  vz: number;
   life: number;
   maxLife: number;
   gravity: number;     // downward accel (negative = rises, e.g. smoke)
   grow: number;        // >0 = scale up over life (fireball/smoke); 0 = shrink
   baseOpacity: number;
+  /** Base edge/radius; the shared unit geometry is scaled to this. */
+  baseSize: number;
+  /** Which pooled geometry this mesh reuses, so it returns to the right pool. */
+  shape: ParticleShape;
 }
 
 /**
@@ -46,44 +56,78 @@ export class EffectsManager {
   private particles: Particle[] = [];
   private wrecks: Wreck[] = [];
 
+  /**
+   * Every particle is one of two shared unit shapes scaled to size, so a burst
+   * uploads its geometry once instead of once per spark. Spent meshes are parked
+   * in a per-shape pool and reused, which keeps a busy field off the allocation
+   * path entirely — no geometry or material is built or disposed per particle.
+   */
+  private readonly unitBox = new THREE.BoxGeometry(1, 1, 1);
+  private readonly unitSphere = new THREE.SphereGeometry(1, 8, 6);
+  private readonly boxPool: THREE.Mesh[] = [];
+  private readonly spherePool: THREE.Mesh[] = [];
+
   constructor(scene: THREE.Scene) {
     this.scene = scene;
   }
 
+  /** Take a ready-made particle mesh of the given shape, building one only if the pool is dry. */
+  private acquire(shape: ParticleShape): THREE.Mesh {
+    const pool = shape === 'box' ? this.boxPool : this.spherePool;
+    const mesh = pool.pop();
+    if (mesh) {
+      mesh.visible = true;
+      this.scene.add(mesh);
+      return mesh;
+    }
+    const geo = shape === 'box' ? this.unitBox : this.unitSphere;
+    const fresh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ transparent: true }));
+    this.scene.add(fresh);
+    return fresh;
+  }
+
+  /** Park a spent particle mesh for reuse rather than disposing its buffers. */
+  private release(p: Particle): void {
+    this.scene.remove(p.mesh);
+    p.mesh.visible = false;
+    (p.shape === 'box' ? this.boxPool : this.spherePool).push(p.mesh);
+  }
+
+  /**
+   * Launch one particle from the pool. Centralising the spawn keeps every burst
+   * allocation-free: the mesh, its geometry and its material all come from the pool.
+   */
+  private emit(
+    shape: ParticleShape, x: number, y: number, z: number, size: number,
+    color: number, opacity: number,
+    vx: number, vy: number, vz: number,
+    maxLife: number, gravity: number, grow: number,
+  ): void {
+    const mesh = this.acquire(shape);
+    mesh.position.set(x, y, z);
+    mesh.scale.setScalar(size);
+    const mat = mesh.material as THREE.MeshBasicMaterial;
+    mat.color.setHex(color);
+    mat.opacity = opacity;
+    this.particles.push({
+      mesh, vx, vy, vz, life: 0, maxLife, gravity, grow,
+      baseOpacity: opacity, baseSize: size, shape,
+    });
+  }
+
   /** `scale` grows the whole burst: a mortar shell is a bigger affair than a quad. */
   spawnExplosion(x: number, y: number, z: number, scale = 1) {
-    const count = 30;
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < 30; i++) {
       const size = (0.2 + Math.random() * 0.4) * scale;
-      const geo = new THREE.BoxGeometry(size, size, size);
       const color = Math.random() > 0.5 ? 0xff4400 : (Math.random() > 0.5 ? 0xffaa00 : 0xff0000);
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(x, y, z);
-      this.scene.add(mesh);
-
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 12 * scale,
-        Math.random() * 8 * scale,
-        (Math.random() - 0.5) * 12 * scale
+      this.emit(
+        'box', x, y, z, size, color, 1,
+        (Math.random() - 0.5) * 12 * scale, Math.random() * 8 * scale, (Math.random() - 0.5) * 12 * scale,
+        0.8 + Math.random() * 0.5, 15, 0,
       );
-
-      this.particles.push({
-        mesh, velocity: vel, life: 0, maxLife: 0.8 + Math.random() * 0.5,
-        gravity: 15, grow: 0, baseOpacity: 1,
-      });
     }
-
-    // Flash sphere
-    const flashGeo = new THREE.SphereGeometry(2 * scale, 8, 8);
-    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 });
-    const flash = new THREE.Mesh(flashGeo, flashMat);
-    flash.position.set(x, y, z);
-    this.scene.add(flash);
-    this.particles.push({
-      mesh: flash, velocity: new THREE.Vector3(0, 0, 0), life: 0, maxLife: 0.3,
-      gravity: 0, grow: 2, baseOpacity: 0.8,
-    });
+    // Flash sphere.
+    this.emit('sphere', x, y, z, 2 * scale, 0xffff00, 0.8, 0, 0, 0, 0.3, 0, 2);
   }
 
   // Lingering crash effect (~5s): bright fireball + rising smoke column + embers.
@@ -92,44 +136,27 @@ export class EffectsManager {
     // Embers (short-lived hot debris)
     for (let i = 0; i < 24; i++) {
       const size = 0.15 + Math.random() * 0.3;
-      const geo = new THREE.BoxGeometry(size, size, size);
       const color = Math.random() > 0.5 ? 0xff6a00 : 0xffaa00;
-      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true }));
-      mesh.position.set(x, y, z);
-      this.scene.add(mesh);
-      this.particles.push({
-        mesh,
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 10, Math.random() * 9, (Math.random() - 0.5) * 10),
-        life: 0, maxLife: 0.9 + Math.random() * 0.6, gravity: 15, grow: 0, baseOpacity: 1,
-      });
+      this.emit(
+        'box', x, y, z, size, color, 1,
+        (Math.random() - 0.5) * 10, Math.random() * 9, (Math.random() - 0.5) * 10,
+        0.9 + Math.random() * 0.6, 15, 0,
+      );
     }
 
     // Fireball (grows then fades ~1.4s)
-    const fire = new THREE.Mesh(
-      new THREE.SphereGeometry(1.4, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0xff6a00, transparent: true, opacity: 0.9 }),
-    );
-    fire.position.set(x, y, z);
-    this.scene.add(fire);
-    this.particles.push({
-      mesh: fire, velocity: new THREE.Vector3(0, 1, 0), life: 0, maxLife: 1.4,
-      gravity: 0, grow: 3, baseOpacity: 0.9,
-    });
+    this.emit('sphere', x, y, z, 1.4, 0xff6a00, 0.9, 0, 1, 0, 1.4, 0, 3);
 
     // Smoke column (rises and lingers ~4-5s)
     for (let i = 0; i < 16; i++) {
       const s = 0.6 + Math.random() * 0.9;
-      const smoke = new THREE.Mesh(
-        new THREE.SphereGeometry(s, 8, 8),
-        new THREE.MeshBasicMaterial({ color: 0x44403c, transparent: true, opacity: 0.55 }),
+      this.emit(
+        'sphere',
+        x + (Math.random() - 0.5) * 1.6, y, z + (Math.random() - 0.5) * 1.6,
+        s, 0x44403c, 0.55,
+        (Math.random() - 0.5) * 0.6, 1.2 + Math.random() * 0.9, (Math.random() - 0.5) * 0.6,
+        4 + Math.random(), -1, 1.6,
       );
-      smoke.position.set(x + (Math.random() - 0.5) * 1.6, y, z + (Math.random() - 0.5) * 1.6);
-      this.scene.add(smoke);
-      this.particles.push({
-        mesh: smoke,
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.6, 1.2 + Math.random() * 0.9, (Math.random() - 0.5) * 0.6),
-        life: 0, maxLife: 4 + Math.random(), gravity: -1, grow: 1.6, baseOpacity: 0.55,
-      });
     }
   }
 
@@ -137,17 +164,11 @@ export class EffectsManager {
   // is easy to follow across the sky.
   spawnTrailPuff(x: number, y: number, z: number, color: number) {
     const size = 0.6 + Math.random() * 0.5;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(size, 6, 6),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6 }),
+    this.emit(
+      'sphere', x, y, z, size, color, 0.6,
+      (Math.random() - 0.5) * 0.8, -0.2, (Math.random() - 0.5) * 0.8,
+      1.4 + Math.random() * 0.6, 0.6, 2.2,
     );
-    mesh.position.set(x, y, z);
-    this.scene.add(mesh);
-    this.particles.push({
-      mesh,
-      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.8, -0.2, (Math.random() - 0.5) * 0.8),
-      life: 0, maxLife: 1.4 + Math.random() * 0.6, gravity: 0.6, grow: 2.2, baseOpacity: 0.6,
-    });
   }
 
   /**
@@ -157,49 +178,35 @@ export class EffectsManager {
    * flame — a house fire is bigger than a car fire.
    */
   spawnFirePuff(x: number, y: number, z: number, scale = 1) {
-    const flame = new THREE.Mesh(
-      new THREE.SphereGeometry((0.2 + Math.random() * 0.25) * scale, 8, 6),
-      new THREE.MeshBasicMaterial({
-        color: Math.random() > 0.45 ? 0xff7a1a : 0xffc24a, transparent: true, opacity: 0.9,
-      }),
+    this.emit(
+      'sphere',
+      x + (Math.random() - 0.5) * 0.6 * scale, y, z + (Math.random() - 0.5) * 0.6 * scale,
+      (0.2 + Math.random() * 0.25) * scale, Math.random() > 0.45 ? 0xff7a1a : 0xffc24a, 0.9,
+      (Math.random() - 0.5) * 0.7 * scale, (1.6 + Math.random() * 1.4) * scale, (Math.random() - 0.5) * 0.7 * scale,
+      0.45 + Math.random() * 0.35, -1.5, 1.6,
     );
-    flame.position.set(x + (Math.random() - 0.5) * 0.6 * scale, y, z + (Math.random() - 0.5) * 0.6 * scale);
-    this.scene.add(flame);
-    this.particles.push({
-      mesh: flame,
-      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.7 * scale, (1.6 + Math.random() * 1.4) * scale, (Math.random() - 0.5) * 0.7 * scale),
-      life: 0, maxLife: 0.45 + Math.random() * 0.35, gravity: -1.5, grow: 1.6, baseOpacity: 0.9,
-    });
 
     // Every other puff leaves a short column of dark smoke behind the flame.
     if (Math.random() > 0.45) {
-      const smoke = new THREE.Mesh(
-        new THREE.SphereGeometry((0.35 + Math.random() * 0.3) * scale, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.55 }),
+      this.emit(
+        'sphere',
+        x + (Math.random() - 0.5) * 0.8 * scale, y + 0.5 * scale, z + (Math.random() - 0.5) * 0.8 * scale,
+        (0.35 + Math.random() * 0.3) * scale, 0x2a2a2a, 0.55,
+        (Math.random() - 0.5) * 0.5 * scale, (2.2 + Math.random() * 1.2) * scale, (Math.random() - 0.5) * 0.5 * scale,
+        2.2 + Math.random() * 1.2, -0.6, 2.4,
       );
-      smoke.position.set(x + (Math.random() - 0.5) * 0.8 * scale, y + 0.5 * scale, z + (Math.random() - 0.5) * 0.8 * scale);
-      this.scene.add(smoke);
-      this.particles.push({
-        mesh: smoke,
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.5 * scale, (2.2 + Math.random() * 1.2) * scale, (Math.random() - 0.5) * 0.5 * scale),
-        life: 0, maxLife: 2.2 + Math.random() * 1.2, gravity: -0.6, grow: 2.4, baseOpacity: 0.55,
-      });
     }
   }
 
   /** A lone column of black smoke, for a fire whose open flame has died down. */
   spawnSmokePuff(x: number, y: number, z: number, scale = 1) {
-    const smoke = new THREE.Mesh(
-      new THREE.SphereGeometry((0.3 + Math.random() * 0.3) * scale, 8, 6),
-      new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.5 }),
+    this.emit(
+      'sphere',
+      x + (Math.random() - 0.5) * 0.7 * scale, y + 0.3 * scale, z + (Math.random() - 0.5) * 0.7 * scale,
+      (0.3 + Math.random() * 0.3) * scale, 0x2a2a2a, 0.5,
+      (Math.random() - 0.5) * 0.4 * scale, (1.8 + Math.random()) * scale, (Math.random() - 0.5) * 0.4 * scale,
+      2.6 + Math.random() * 1.4, -0.5, 2.6,
     );
-    smoke.position.set(x + (Math.random() - 0.5) * 0.7 * scale, y + 0.3 * scale, z + (Math.random() - 0.5) * 0.7 * scale);
-    this.scene.add(smoke);
-    this.particles.push({
-      mesh: smoke,
-      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.4 * scale, (1.8 + Math.random()) * scale, (Math.random() - 0.5) * 0.4 * scale),
-      life: 0, maxLife: 2.6 + Math.random() * 1.4, gravity: -0.5, grow: 2.6, baseOpacity: 0.5,
-    });
   }
 
   /**
@@ -275,23 +282,24 @@ export class EffectsManager {
       const p = this.particles[i];
       p.life += dt;
       if (p.life >= p.maxLife) {
-        this.scene.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        (p.mesh.material as THREE.Material).dispose();
+        this.release(p);
         this.particles.splice(i, 1);
         continue;
       }
 
       const t = p.life / p.maxLife;
-      // Gravity (negative gravity makes smoke rise)
-      p.velocity.y -= p.gravity * dt;
-      p.mesh.position.add(p.velocity.clone().multiplyScalar(dt));
+      // Gravity (negative gravity makes smoke rise), then integrate position in
+      // place — no vector is cloned on the way, so the loop allocates nothing.
+      p.vy -= p.gravity * dt;
+      p.mesh.position.x += p.vx * dt;
+      p.mesh.position.y += p.vy * dt;
+      p.mesh.position.z += p.vz * dt;
       // Fade
       const mat = p.mesh.material as THREE.MeshBasicMaterial;
       mat.opacity = p.baseOpacity * (1 - t);
-      // Grow (fireball/smoke) or shrink (debris)
-      const scale = p.grow > 0 ? 1 + t * p.grow : 1 - t * 0.5;
-      p.mesh.scale.setScalar(scale);
+      // Grow (fireball/smoke) or shrink (debris), about the particle's own size.
+      const factor = p.grow > 0 ? 1 + t * p.grow : 1 - t * 0.5;
+      p.mesh.scale.setScalar(p.baseSize * factor);
     }
 
     // Burning wrecks: open flame for the first quarter-minute, then smoke only,

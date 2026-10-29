@@ -119,6 +119,17 @@ export class EnemyRenderer {
         else if (enemy.slowedUntil > Date.now()) emissive = 0x440044;
         this.setEmissive(obj, emissive);
       }
+      // Distant enemies barely add to the shadow map yet still cost a shadow-pass
+      // draw every frame, so far-off spawns stop casting until they close on the
+      // fort. Toggled only when an enemy crosses the threshold, not every frame.
+      const nearShadow = enemy.position.x * enemy.position.x + enemy.position.z * enemy.position.z < 3600;
+      if (obj.userData.shadows !== nearShadow) {
+        obj.userData.shadows = nearShadow;
+        obj.traverse((child) => {
+          const mesh = child as THREE.Mesh;
+          if (mesh.isMesh) mesh.castShadow = nearShadow;
+        });
+      }
       obj.visible = true;
     }
 

@@ -47,6 +47,10 @@ export class HUD {
   onShopBuy: ((spec: ShopItemSpec) => void) | null = null;
   private announceTimeout: ReturnType<typeof setTimeout> | null = null;
   private static readonly KEYS_GUIDE_PREF = 'red-attack:keys-guide';
+  /** The FPS readout and whether it is on screen (F3 toggles it, default on). */
+  private fpsDisplay: HTMLElement;
+  private fpsVisible: boolean;
+  private static readonly FPS_PREF = 'red-attack:fps';
 
   constructor() {
     this.breachDisplay = document.getElementById('breach-display')!;
@@ -86,6 +90,9 @@ export class HUD {
     this.kgLaunch = document.getElementById('kg-launch')!;
     this.keysGuideVisible = HUD.readKeysGuidePref();
     this.applyKeysGuide();
+    this.fpsDisplay = document.getElementById('fps-display')!;
+    this.fpsVisible = HUD.readFpsPref();
+    this.applyFps();
     this.shopPanel = document.getElementById('shop-panel')!;
     this.shopRowsEl = document.getElementById('shop-rows')!;
     this.spCredits = document.getElementById('sp-credits')!;
@@ -349,6 +356,45 @@ export class HUD {
   private static readKeysGuidePref(): boolean {
     try {
       return localStorage.getItem(HUD.KEYS_GUIDE_PREF) !== '0';
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Paint the FPS readout. Colour-coded so a dip reads at a glance: green at a
+   * smooth frame rate, amber when it starts to sag, red when the field is heavy.
+   * A no-op while the counter is hidden, so a switched-off toggle costs nothing.
+   */
+  setFps(fps: number, worstMs: number) {
+    if (!this.fpsDisplay || !this.fpsVisible) return;
+    // The worst frame time in the window is shown next to the average: a steady
+    // 144 FPS that occasionally drops a 40 ms frame stutters, and this reveals it.
+    this.fpsDisplay.textContent = `${fps} FPS · ${worstMs}ms`;
+    this.fpsDisplay.classList.toggle('mid', fps < 50 && fps >= 30);
+    this.fpsDisplay.classList.toggle('low', fps < 30);
+  }
+
+  /** Show/hide the FPS counter (bound to the F3 key). */
+  toggleFps() {
+    this.fpsVisible = !this.fpsVisible;
+    this.applyFps();
+  }
+
+  get fpsIsVisible(): boolean { return this.fpsVisible; }
+
+  private applyFps() {
+    this.fpsDisplay.classList.toggle('hidden', !this.fpsVisible);
+    try {
+      localStorage.setItem(HUD.FPS_PREF, this.fpsVisible ? '1' : '0');
+    } catch {
+      // Storage can be unavailable (private mode / file://) — the toggle still works this session.
+    }
+  }
+
+  private static readFpsPref(): boolean {
+    try {
+      return localStorage.getItem(HUD.FPS_PREF) !== '0';
     } catch {
       return true;
     }

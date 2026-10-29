@@ -71,6 +71,8 @@ export class InputManager {
   onDropBomb: (() => void) | null = null;
   onSelfDestruct: (() => void) | null = null;
   onToggleKeysGuide: (() => void) | null = null;
+  /** Show/hide the FPS counter (F3). */
+  onToggleFps: (() => void) | null = null;
   /** Pick a weapon outright (1 = quad, 2 = mortar). */
   onSelectWeapon: ((weapon: WeaponType) => void) | null = null;
   /** Flip to the other weapon without naming it (Tab). */
@@ -135,6 +137,14 @@ export class InputManager {
         return;
       }
       if (e.repeat) return;
+
+      // F3 toggles the FPS readout. It is a debug view rather than a gameplay key,
+      // so it answers even while the armory is up — handled ahead of the shop gate.
+      if (e.code === 'F3') {
+        e.preventDefault();
+        this.onToggleFps?.();
+        return;
+      }
 
       // The armory is a deliberate pause. While it is up the fort hears nothing at
       // all: gameplay keys are not even recorded, so a held W cannot keep flying a

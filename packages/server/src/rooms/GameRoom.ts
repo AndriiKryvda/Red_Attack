@@ -1282,7 +1282,7 @@ export class GameRoom extends Room {
           if (!weaponIsUnlocked(msg.weapon, player.unlocked)) {
             // Sent down the same 'event' channel the room broadcasts use, but to him
             // alone: his HUD flashes the price, nobody else's screen reacts.
-            this.send(client, 'event', {
+            client.send('event', {
               type: 'purchase_denied',
               item: shopItemFor(msg.weapon)?.item ?? ShopItem.VAMPIRE,
               reason: 'locked',
@@ -1370,22 +1370,22 @@ export class GameRoom extends Room {
         // Nothing changes hands while the fort is still being drawn up or after it
         // has fallen: a purchase is a decision made under the horde, not in the lobby.
         if (this.phase !== GamePhase.PLAYING) {
-          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'closed', credits: player.credits });
+          client.send('event', { type: 'purchase_denied', item: spec.item, reason: 'closed', credits: player.credits });
           break;
         }
         if (spec.weapon && player.unlocked.includes(spec.weapon)) {
-          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'owned', credits: player.credits });
+          client.send('event', { type: 'purchase_denied', item: spec.item, reason: 'owned', credits: player.credits });
           break;
         }
         // A mine field is a refill of the belt, not a stack of belts. When every hole is
         // already occupied there is nothing this purchase could bury, so the armory says
         // so instead of taking the credits for a field that would not change by one mine.
         if (spec.item === ShopItem.MINEFIELD && this.emptyMineSpots().length === 0) {
-          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'full', credits: player.credits });
+          client.send('event', { type: 'purchase_denied', item: spec.item, reason: 'full', credits: player.credits });
           break;
         }
         if (player.credits < spec.cost) {
-          this.send(client, 'event', { type: 'purchase_denied', item: spec.item, reason: 'credits', credits: player.credits });
+          client.send('event', { type: 'purchase_denied', item: spec.item, reason: 'credits', credits: player.credits });
           break;
         }
         player.credits -= spec.cost;

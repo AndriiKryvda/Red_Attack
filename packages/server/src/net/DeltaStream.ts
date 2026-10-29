@@ -280,7 +280,7 @@ export class DeltaStream {
       const frame = this.build(view, tick, now, header, snap,
         encEnemies, encStructures, encDrones, encBombs, encMines, encPlayers);
       if (frame !== undefined) {
-        this.room.send(client, 'state', frame);
+        client.send('state', frame);
         this.stats.frames++;
         view.lastSentAt = now;
       }
